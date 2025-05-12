@@ -20,6 +20,17 @@ jobs:
           go-version: '1.21'
           check-latest: true
 
+      - name: Fix module path
+        run: |
+          # Create directories for module path
+          mkdir -p $GOPATH/src/github.com/navicore
+          ln -sf $(pwd) $GOPATH/src/github.com/navicore/mcpterm-go
+        env:
+          GOPATH: ${{ runner.temp }}/go
+
+      - name: Install dependencies
+        run: go mod download
+
       - name: Run tests
         run: go test -v ./...
 

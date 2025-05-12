@@ -1,7 +1,7 @@
 package main
 
 import (
-	"mcpterm-go/cmd/mcpterm"
+	"github.com/navicore/mcpterm-go/cmd/mcpterm"
 )
 
 func main() {
