@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          check-latest: true
+
+      - name: Run tests
+        run: go test -v ./...
+
+      - name: Build
+        run: |
+          GOOS=linux GOARCH=amd64 go build -o mcpterm-linux-amd64
+          GOOS=darwin GOARCH=amd64 go build -o mcpterm-darwin-amd64
+          GOOS=darwin GOARCH=arm64 go build -o mcpterm-darwin-arm64
+          GOOS=windows GOARCH=amd64 go build -o mcpterm-windows-amd64.exe
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            mcpterm-linux-amd64
+            mcpterm-darwin-amd64
+            mcpterm-darwin-arm64
+            mcpterm-windows-amd64.exe
