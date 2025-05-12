@@ -1,10 +1,8 @@
-module mcpterm-go
+module github.com/navicore/mcpterm-go
 
 go 1.23.0
 
 toolchain go1.24.3
-
-replace mcpterm-go => ./
 
 require (
 	github.com/atotto/clipboard v0.1.4

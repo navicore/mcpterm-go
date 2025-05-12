@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -86,9 +87,13 @@ func NewBedrockBackend(config Config) (Backend, error) {
 			nil,
 		)
 	}
-	
-	// Use AWS SDK to create a Bedrock client with default credentials and region
-	cfg, err := LoadAWSConfig(context.Background(), config.Options)
+
+	// Create context with timeout for AWS operations
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Use AWS SDK to create a Bedrock client with credentials and region
+	cfg, err := LoadAWSConfig(ctx, config.Options)
 	if err != nil {
 		return nil, NewBackendError(
 			ErrCodeAuthentication,
@@ -96,9 +101,10 @@ func NewBedrockBackend(config Config) (Backend, error) {
 			err,
 		)
 	}
-	
+
+	// Create the Bedrock client
 	client := bedrockruntime.NewFromConfig(cfg)
-	
+
 	// Set default parameters if not specified
 	if config.MaxTokens <= 0 {
 		config.MaxTokens = DefaultMaxTokens
@@ -106,7 +112,14 @@ func NewBedrockBackend(config Config) (Backend, error) {
 	if config.Temperature <= 0 {
 		config.Temperature = DefaultTemperature
 	}
-	
+
+	// Validate parameters
+	if config.Temperature < 0 {
+		config.Temperature = 0
+	} else if config.Temperature > 1 {
+		config.Temperature = 1
+	}
+
 	return &BedrockBackend{
 		client:  client,
 		config:  config,
@@ -127,6 +140,33 @@ func LoadAWSConfig(ctx context.Context, options map[string]any) (aws.Config, err
 	if profile, ok := options["profile"].(string); ok && profile != "" {
 		loadOpts = append(loadOpts, config.WithSharedConfigProfile(profile))
 	}
+
+	// Add specific credentials if provided
+	if accessKey, ok := options["access_key"].(string); ok && accessKey != "" {
+		if secretKey, ok := options["secret_key"].(string); ok && secretKey != "" {
+			// Create static credentials provider
+			loadOpts = append(loadOpts, config.WithCredentialsProvider(
+				aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
+					return aws.Credentials{
+						AccessKeyID:     accessKey,
+						SecretAccessKey: secretKey,
+					}, nil
+				}),
+			))
+		}
+	}
+
+	// Setting shared config files
+	loadOpts = append(loadOpts, config.WithSharedConfigFiles([]string{
+		"~/.aws/config",
+	}))
+
+	loadOpts = append(loadOpts, config.WithSharedCredentialsFiles([]string{
+		"~/.aws/credentials",
+	}))
+
+	// Set maximum retry attempts for AWS operations
+	loadOpts = append(loadOpts, config.WithRetryMaxAttempts(5))
 
 	// Load the configuration
 	return config.LoadDefaultConfig(ctx, loadOpts...)
@@ -234,6 +274,10 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 		)
 	}
 	
+	// Create a context with timeout for the API call
+	apiCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
 	// Call the Bedrock API
 	bedrockReq := &bedrockruntime.InvokeModelInput{
 		ModelId:     aws.String(b.modelID),
@@ -241,9 +285,18 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 		Accept:      aws.String("application/json"),
 		Body:        reqJSON,
 	}
-	
-	bedrockResp, err := b.client.InvokeModel(ctx, bedrockReq)
+
+	bedrockResp, err := b.client.InvokeModel(apiCtx, bedrockReq)
 	if err != nil {
+		// Check for context timeout
+		if apiCtx.Err() == context.DeadlineExceeded {
+			return ChatResponse{Error: err}, NewBackendError(
+				ErrCodeServiceUnavailable,
+				"request to AWS Bedrock timed out after 60 seconds",
+				err,
+			)
+		}
+
 		return ChatResponse{Error: err}, mapBedrockError(err)
 	}
 	
@@ -289,36 +342,107 @@ func mapBedrockError(err error) error {
 	// Check for common error patterns based on the error message
 	errMsg := err.Error()
 
-	if strings.Contains(errMsg, "rate limit") || strings.Contains(errMsg, "throttled") {
+	// Throttling and rate limiting errors
+	if strings.Contains(errMsg, "rate limit") ||
+	   strings.Contains(errMsg, "throttled") ||
+	   strings.Contains(errMsg, "ThrottlingException") ||
+	   strings.Contains(errMsg, "TooManyRequestsException") {
 		return NewBackendError(
 			ErrCodeRateLimited,
-			"API rate limit exceeded",
+			"API rate limit exceeded. Please try again in a few moments.",
 			err,
 		)
 	}
 
-	if strings.Contains(errMsg, "content filter") || strings.Contains(errMsg, "safety") {
+	// Authentication and permission errors
+	if strings.Contains(errMsg, "AccessDeniedException") ||
+	   strings.Contains(errMsg, "AuthorizationException") ||
+	   strings.Contains(errMsg, "UnrecognizedClientException") ||
+	   strings.Contains(errMsg, "InvalidSignatureException") ||
+	   strings.Contains(errMsg, "not authorized") {
+		return NewBackendError(
+			ErrCodeAuthentication,
+			"Authentication failed. Please check your AWS credentials and permissions.",
+			err,
+		)
+	}
+
+	// Content filtering errors
+	if strings.Contains(errMsg, "content filter") ||
+	   strings.Contains(errMsg, "safety") ||
+	   strings.Contains(errMsg, "ContentFilterException") ||
+	   strings.Contains(errMsg, "violated content policy") {
 		return NewBackendError(
 			ErrCodeContentFiltered,
-			"Content was filtered due to safety concerns",
+			"Content was filtered due to safety or content policy concerns.",
 			err,
 		)
 	}
 
+	// Context length and token limit errors
 	if strings.Contains(errMsg, "context length") ||
-		strings.Contains(errMsg, "token limit") ||
-		strings.Contains(errMsg, "too many tokens") {
+	   strings.Contains(errMsg, "token limit") ||
+	   strings.Contains(errMsg, "too many tokens") ||
+	   strings.Contains(errMsg, "ModelTokenLimitExceededException") {
 		return NewBackendError(
 			ErrCodeContextLengthExceeded,
-			"Input exceeded maximum context length",
+			"Input exceeded maximum context length for the model.",
 			err,
 		)
 	}
 
-	if strings.Contains(errMsg, "validation") || strings.Contains(errMsg, "invalid") {
+	// Validation and invalid parameter errors
+	if strings.Contains(errMsg, "validation") ||
+	   strings.Contains(errMsg, "invalid") ||
+	   strings.Contains(errMsg, "ValidationException") ||
+	   strings.Contains(errMsg, "InvalidRequestException") {
 		return NewBackendError(
 			ErrCodeInvalidRequest,
-			"Invalid request parameters",
+			"Invalid request parameters. Please check your model configuration.",
+			err,
+		)
+	}
+
+	// Network and connectivity errors
+	if strings.Contains(errMsg, "connection") ||
+	   strings.Contains(errMsg, "timeout") ||
+	   strings.Contains(errMsg, "network") ||
+	   strings.Contains(errMsg, "dial") ||
+	   strings.Contains(errMsg, "EOF") {
+		return NewBackendError(
+			ErrCodeNetwork,
+			"Network error occurred. Please check your internet connection.",
+			err,
+		)
+	}
+
+	// Service unavailable errors
+	if strings.Contains(errMsg, "ServiceUnavailableException") ||
+	   strings.Contains(errMsg, "service unavailable") ||
+	   strings.Contains(errMsg, "InternalServerException") ||
+	   strings.Contains(errMsg, "500") {
+		return NewBackendError(
+			ErrCodeServiceUnavailable,
+			"AWS Bedrock service is currently unavailable. Please try again later.",
+			err,
+		)
+	}
+
+	// Model specific errors
+	if strings.Contains(errMsg, "ModelNotReadyException") {
+		return NewBackendError(
+			ErrCodeServiceUnavailable,
+			"The requested model is not ready or available in this region.",
+			err,
+		)
+	}
+
+	if strings.Contains(errMsg, "ModelNotFoundException") ||
+	   strings.Contains(errMsg, "model not found") {
+		return NewBackendError(
+			ErrCodeInvalidConfiguration,
+			fmt.Sprintf("Model not found: %s. Please check the model ID and region.",
+				strings.Split(errMsg, ":")[0]),
 			err,
 		)
 	}
@@ -326,7 +450,7 @@ func mapBedrockError(err error) error {
 	// Default to unknown error
 	return NewBackendError(
 		ErrCodeUnknown,
-		fmt.Sprintf("Unknown error: %v", err),
+		fmt.Sprintf("Unknown AWS Bedrock error: %v", err),
 		err,
 	)
 }

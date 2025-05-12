@@ -11,6 +11,7 @@ We provide two methods for managing development tasks: a Makefile and a Go-based
 ```bash
 make          # Build the application
 make run      # Build and run the application
+make run-claude # Run with AWS Bedrock and Claude 3.7 Sonnet
 make test     # Run tests
 make lint     # Run linters
 make fmt      # Format code
@@ -61,6 +62,35 @@ mcpterm-go/
 3. Run tests: `go run task.go test`
 4. Run lint checks: `go run task.go lint`
 5. Build and run the application: `go run task.go run`
+
+## AWS Bedrock Integration
+
+To use the AWS Bedrock backend for Claude models:
+
+1. Ensure AWS credentials are configured in `~/.aws/credentials` or environment variables
+2. Run the application with appropriate flags:
+
+```bash
+# Using the claude-specific Make target
+make run-claude
+
+# Or with manual configuration
+./mcpterm --backend aws-bedrock --model us.anthropic.claude-3-7-sonnet-20250219-v1:0 --aws-region us-west-2 --aws-profile your-profile-name
+```
+
+### AWS Authentication
+
+The application supports these authentication methods:
+
+- AWS profile (`--aws-profile`)
+- Default credentials from ~/.aws/credentials
+- Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
+- IAM roles (when running on EC2 or similar AWS services)
+
+### Claude 3.7 Sonnet Integration
+
+Claude 3.7 Sonnet is accessible via AWS Bedrock in the us-west-2 region using the model ID:
+`us.anthropic.claude-3-7-sonnet-20250219-v1:0`
 
 ## Adding Features
 
