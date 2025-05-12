@@ -12,16 +12,21 @@ import (
 )
 
 const (
-	// Claude models
-	ModelClaude37Sonnet      = "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
-	ModelClaude3Sonnet       = "anthropic.claude-3-sonnet-20240229-v1:0"
-	ModelClaude3Haiku        = "anthropic.claude-3-haiku-20240307-v1:0"
-	ModelClaude3Opus         = "anthropic.claude-3-opus-20240229-v1:0"
-	
+	// Claude models - AWS Bedrock model IDs
+	// Some models use the us.anthropic.* prefix (US region specific models)
+	// Others use the anthropic.* prefix (available in multiple regions)
+	ModelClaude37Sonnet      = "us.anthropic.claude-3-7-sonnet-20250219-v1:0"  // US region model
+	ModelClaude3Sonnet       = "anthropic.claude-3-sonnet-20240229-v1:0"       // Multi-region model
+	ModelClaude3Haiku        = "anthropic.claude-3-haiku-20240307-v1:0"        // Multi-region model
+	ModelClaude3Opus         = "anthropic.claude-3-opus-20240229-v1:0"         // Multi-region model
+
 	// Default parameters
 	DefaultMaxTokens   = 4096
 	DefaultTemperature = 0.7
 	DefaultTopP        = 0.9
+
+	// Anthropic API version for Bedrock
+	AnthropicVersion   = "bedrock-2023-05-31"
 )
 
 func init() {
@@ -112,12 +117,17 @@ func NewBedrockBackend(config Config) (Backend, error) {
 // LoadAWSConfig loads AWS configuration with optional overrides
 func LoadAWSConfig(ctx context.Context, options map[string]any) (aws.Config, error) {
 	loadOpts := []func(*config.LoadOptions) error{}
-	
+
 	// Apply custom region if specified
 	if region, ok := options["region"].(string); ok && region != "" {
 		loadOpts = append(loadOpts, config.WithRegion(region))
 	}
-	
+
+	// Apply AWS profile if specified
+	if profile, ok := options["profile"].(string); ok && profile != "" {
+		loadOpts = append(loadOpts, config.WithSharedConfigProfile(profile))
+	}
+
 	// Load the configuration
 	return config.LoadDefaultConfig(ctx, loadOpts...)
 }
@@ -160,15 +170,27 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 	if maxTokens <= 0 {
 		maxTokens = b.config.MaxTokens
 	}
-	
+
+	// Validate and set temperature (must be between 0 and 1)
 	temperature := req.Temperature
 	if temperature <= 0 {
 		temperature = b.config.Temperature
 	}
-	
+	if temperature < 0 {
+		temperature = 0
+	} else if temperature > 1 {
+		temperature = 1
+	}
+
+	// Validate and set topP (must be between 0 and 1)
 	topP := req.TopP
 	if topP <= 0 {
 		topP = DefaultTopP
+	}
+	if topP < 0 {
+		topP = 0
+	} else if topP > 1 {
+		topP = 1
 	}
 	
 	// Extract any Claude-specific options
@@ -186,7 +208,7 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 	
 	// Create the Claude request payload
 	claudeReq := AnthropicRequest{
-		AnthropicVersion: "bedrock-2023-05-31",
+		AnthropicVersion: AnthropicVersion,
 		Messages:         claudeMessages,
 		MaxTokens:        maxTokens,
 		Temperature:      temperature,

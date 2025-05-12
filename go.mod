@@ -4,6 +4,8 @@ go 1.23.0
 
 toolchain go1.24.3
 
+replace mcpterm-go => ./
+
 require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/aws/aws-sdk-go-v2 v1.36.3
