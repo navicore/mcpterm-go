@@ -1,4 +1,4 @@
-.PHONY: build run test lint clean all default
+.PHONY: build run run-claude test lint clean all default
 
 # Binary name
 BINARY_NAME=mcpterm
@@ -26,6 +26,12 @@ build:
 run: build
 	@echo "Running $(PROJECT_NAME)..."
 	./$(BINARY_NAME)
+
+# Run the application with AWS Bedrock Claude 3.7 Sonnet
+run-claude: build
+	@echo "Running $(PROJECT_NAME) with AWS Bedrock Claude 3.7 Sonnet..."
+	@echo "Note: Make sure AWS credentials are configured properly"
+	./$(BINARY_NAME) --backend aws-bedrock --model us.anthropic.claude-3-7-sonnet-20250219-v1:0 --aws-region us-west-2
 
 # Run tests
 test:
@@ -79,6 +85,7 @@ help:
 	@echo "  make              - Build the application"
 	@echo "  make build        - Build the application"
 	@echo "  make run          - Build and run the application"
+	@echo "  make run-claude   - Run with AWS Bedrock Claude 3.7 Sonnet"
 	@echo "  make test         - Run tests"
 	@echo "  make lint         - Run linters"
 	@echo "  make fmt          - Format code"

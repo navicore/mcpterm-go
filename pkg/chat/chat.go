@@ -4,35 +4,35 @@ import (
 	"strings"
 )
 
-// Message represents a chat message
-type Message struct {
+// SimpleMessage represents a chat message in the simple chat service
+type SimpleMessage struct {
 	Sender  string
 	Content string
 	IsUser  bool
 }
 
-// ChatService defines the interface for chat functionality
-type ChatService interface {
-	SendMessage(content string) (Message, error)
-	GetHistory() []Message
+// ChatServiceInterface defines the interface for chat functionality
+type ChatServiceInterface interface {
+	SendMessage(content string) (SimpleMessage, error)
+	GetHistory() []SimpleMessage
 }
 
-// SimpleChatService is a basic implementation of ChatService
+// SimpleChatService is a basic implementation of ChatServiceInterface
 type SimpleChatService struct {
-	history []Message
+	history []SimpleMessage
 }
 
 // NewSimpleChatService creates a new chat service instance
 func NewSimpleChatService() *SimpleChatService {
 	return &SimpleChatService{
-		history: []Message{},
+		history: []SimpleMessage{},
 	}
 }
 
 // SendMessage sends a message and returns a response
-func (s *SimpleChatService) SendMessage(content string) (Message, error) {
+func (s *SimpleChatService) SendMessage(content string) (SimpleMessage, error) {
 	// Add user message to history
-	userMsg := Message{
+	userMsg := SimpleMessage{
 		Sender:  "You",
 		Content: content,
 		IsUser:  true,
@@ -114,7 +114,7 @@ func (s *SimpleChatService) SendMessage(content string) (Message, error) {
 			"How can I help you with that? Type `help` for a list of commands."
 	}
 
-	botMsg := Message{
+	botMsg := SimpleMessage{
 		Sender:  "Assistant",
 		Content: response,
 		IsUser:  false,
@@ -125,6 +125,6 @@ func (s *SimpleChatService) SendMessage(content string) (Message, error) {
 }
 
 // GetHistory returns the chat history
-func (s *SimpleChatService) GetHistory() []Message {
+func (s *SimpleChatService) GetHistory() []SimpleMessage {
 	return s.history
 }
