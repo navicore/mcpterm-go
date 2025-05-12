@@ -5,6 +5,11 @@
 *.so
 *.dylib
 mcpterm
+mcpterm-go
+mcpterm-linux-amd64
+mcpterm-darwin-amd64
+mcpterm-darwin-arm64
+mcpterm-windows-amd64.exe
 
 # Test binary, built with `go test -c`
 *.test

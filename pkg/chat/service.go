@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"mcpterm-go/pkg/backend"
+	"github.com/navicore/mcpterm-go/pkg/backend"
 )
 
 // Message represents a chat message
