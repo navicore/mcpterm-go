@@ -8,7 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/navicore/mcpterm-go/pkg/chat"
+	"mcpterm-go/pkg/chat"
 )
 
 // Message represents a chat message

@@ -20,6 +20,9 @@ jobs:
           go-version: '1.21'
           cache: true
 
+      - name: Set GOWORK=off
+        run: echo "GOWORK=off" >> $GITHUB_ENV
+
       - name: Install dependencies
         run: go mod download
 

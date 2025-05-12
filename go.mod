@@ -1,4 +1,4 @@
-module github.com/navicore/mcpterm-go
+module mcpterm-go
 
 go 1.23.0
 

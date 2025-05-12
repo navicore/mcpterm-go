@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	
-	"github.com/navicore/mcpterm-go/pkg/backend"
-	"github.com/navicore/mcpterm-go/pkg/chat"
+	"mcpterm-go/pkg/backend"
+	"mcpterm-go/pkg/chat"
 )
 
 // Config represents the application configuration
