@@ -24,7 +24,11 @@ jobs:
       run: go mod tidy
 
     - name: Build
-      run: go build -v
+      run: |
+        echo "Building main package"
+        go build -v
+        echo "Building all packages"
+        go build -v ./...
 
     - name: Run tests
       run: go test -v ./...
