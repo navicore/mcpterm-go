@@ -23,7 +23,7 @@ type Model struct {
 	viewport      viewport.Model
 	editor        *ViEditor
 	messages      []Message
-	chatService   chat.ChatService
+	chatService   *chat.ChatService
 	err           error
 	showHelp      bool
 	windowWidth   int
@@ -86,7 +86,6 @@ func NewModel() Model {
 		viewport:          vp,
 		editor:            editor,
 		messages:          []Message{},
-		chatService:       chat.NewSimpleChatService(),
 		showHelp:          true,
 		viewportFocused:   false,
 		viewportSelection: NewSelection(),
@@ -94,6 +93,11 @@ func NewModel() Model {
 		viewportPosition:  0,
 		viewportVisual:    false,
 	}
+}
+
+// SetChatService sets the chat service for the model
+func (m *Model) SetChatService(service *chat.ChatService) {
+	m.chatService = service
 }
 
 // AddMessage adds a message to the chat history
@@ -257,7 +261,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 					// Add bot response
 					m.AddMessage(Message{
-						Username: response.Sender,
+						Username: "Assistant",
 						Content:  response.Content,
 						IsUser:   false,
 					})

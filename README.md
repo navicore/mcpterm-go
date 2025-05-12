@@ -1,12 +1,16 @@
 # MCPTerm
 
-A terminal-based chat application with vi-like motion support built in Go.
-
 # UNDER CONSTRUCTION
 
 # UNDER CONSTRUCTION
 
 # UNDER CONSTRUCTION
+
+A terminal-based chat application with vi-like motion support built in Go, featuring multiple chat backends including AWS Bedrock for Claude models.
+
+## Overview
+
+MCPTerm provides a terminal user interface for chat interactions with AI assistants, complete with vi-like navigation, markdown rendering, and a modular backend system that supports different AI providers.
 
 ## Features
 
@@ -16,6 +20,10 @@ A terminal-based chat application with vi-like motion support built in Go.
 - **Input History**: Navigate through previous messages with up/down keys
 - **Mode Indicators**: Visual indication of current mode (normal/insert)
 - **Command System**: Simple command system for features and information
+- **Multiple Backends**: Support for different AI providers:
+  - **AWS Bedrock**: Integration with Claude models
+  - **Mock Backend**: For testing without API access
+- **Configuration**: Flexible configuration via file or command-line flags
 
 ## Requirements
 
@@ -43,8 +51,11 @@ go run task.go build
 
 3. Run the application (choose one):
 ```bash
-# Run directly
+# Run with default mock backend
 ./mcpterm
+
+# Using AWS Bedrock for Claude
+./mcpterm --backend aws-bedrock --model us.anthropic.claude-3-7-sonnet-20250219-v1:0 --aws-region us-west-2
 
 # Using Makefile
 make run
@@ -82,6 +93,56 @@ go run task.go clean     # Clean build artifacts
 go run task.go all       # Format, build, test, and lint
 go run task.go tools     # Install development tools
 ```
+
+## Backend Configuration
+
+MCPTerm supports multiple backends for interacting with various AI services:
+
+### AWS Bedrock
+
+To use AWS Bedrock with Claude models:
+
+```bash
+./mcpterm --backend aws-bedrock --model <model-id> --aws-region <region> [--aws-profile <profile>]
+```
+
+Available Claude model IDs:
+- `us.anthropic.claude-3-7-sonnet-20250219-v1:0` - Claude 3.7 Sonnet (Recommended)
+- `anthropic.claude-3-sonnet-20240229-v1:0` - Claude 3 Sonnet
+- `anthropic.claude-3-haiku-20240307-v1:0` - Claude 3 Haiku
+- `anthropic.claude-3-opus-20240229-v1:0` - Claude 3 Opus
+
+AWS authentication is handled via the standard AWS SDK mechanisms:
+- AWS credentials file
+- Environment variables
+- IAM roles
+- AWS profiles (specify with `--aws-profile`)
+
+### Mock Backend
+
+For testing without API access:
+
+```bash
+./mcpterm --mock
+```
+
+Or explicitly:
+
+```bash
+./mcpterm --backend mock
+```
+
+The mock backend provides pre-programmed responses based on keywords in your messages.
+
+### Configuration Options
+
+Common configuration flags:
+- `--config <path>` - Path to config file (default: `$HOME/.config/mcpterm/config.json`)
+- `--temperature <float>` - Temperature for sampling (default: 0.7)
+- `--max-tokens <int>` - Maximum tokens in response (default: 1000)
+- `--context-size <int>` - Number of messages to include in context (default: 20)
+- `--system-prompt <string>` - Custom system prompt
+- `--show-tokens` - Show token usage statistics
 
 ## Usage
 
@@ -161,6 +222,8 @@ Type these commands to see different responses:
 - [Bubbles](https://github.com/charmbracelet/bubbles) - TUI components
 - [Lipgloss](https://github.com/charmbracelet/lipgloss) - Style definitions
 - [Glamour](https://github.com/charmbracelet/glamour) - Markdown rendering
+- [AWS SDK for Go v2](https://github.com/aws/aws-sdk-go-v2) - AWS API access
+- [AWS Bedrock Runtime](https://github.com/aws/aws-sdk-go-v2/tree/main/service/bedrockruntime) - AWS Bedrock API
 
 ## License
 
