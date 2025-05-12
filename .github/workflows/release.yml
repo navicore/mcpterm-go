@@ -20,21 +20,28 @@ jobs:
           go-version: '1.21'
           check-latest: true
 
-      - name: Set GOWORK=off
-        run: echo "GOWORK=off" >> $GITHUB_ENV
-
-      - name: Install dependencies
-        run: go mod download
-
-      - name: Run tests
-        run: go test -v ./...
-
-      - name: Build
+      - name: Setup custom GOPATH for project
         run: |
-          GOOS=linux GOARCH=amd64 go build -o mcpterm-linux-amd64
-          GOOS=darwin GOARCH=amd64 go build -o mcpterm-darwin-amd64
-          GOOS=darwin GOARCH=arm64 go build -o mcpterm-darwin-arm64
-          GOOS=windows GOARCH=amd64 go build -o mcpterm-windows-amd64.exe
+          mkdir -p $HOME/go/src/mcpterm-go
+          cp -r $GITHUB_WORKSPACE/* $HOME/go/src/mcpterm-go/
+          cd $HOME/go/src/mcpterm-go
+          go mod tidy
+
+      - name: Test
+        working-directory: ${{ env.GOPATH }}/src/mcpterm-go
+        run: go test -v ./...
+        env:
+          GOPATH: ${{ runner.home }}/go
+
+      - name: Build binaries
+        working-directory: ${{ env.GOPATH }}/src/mcpterm-go
+        run: |
+          GOOS=linux GOARCH=amd64 go build -v -o $GITHUB_WORKSPACE/mcpterm-linux-amd64
+          GOOS=darwin GOARCH=amd64 go build -v -o $GITHUB_WORKSPACE/mcpterm-darwin-amd64
+          GOOS=darwin GOARCH=arm64 go build -v -o $GITHUB_WORKSPACE/mcpterm-darwin-arm64
+          GOOS=windows GOARCH=amd64 go build -v -o $GITHUB_WORKSPACE/mcpterm-windows-amd64.exe
+        env:
+          GOPATH: ${{ runner.home }}/go
 
       - name: Create Release
         id: create_release

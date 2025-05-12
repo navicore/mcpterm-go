@@ -37,14 +37,18 @@ jobs:
         go-version: '1.21'
         check-latest: true
 
-    - name: Set GOWORK=off
-      run: echo "GOWORK=off" >> $GITHUB_ENV
-
-    - name: Install dependencies
-      run: go mod download
+    - name: Setup custom GOPATH for project
+      run: |
+        mkdir -p $HOME/go/src/mcpterm-go
+        cp -r $GITHUB_WORKSPACE/* $HOME/go/src/mcpterm-go/
+        cd $HOME/go/src/mcpterm-go
+        go mod tidy
 
     - name: Build
+      working-directory: ${{ env.GOPATH }}/src/mcpterm-go
       run: go build -v ./...
+      env:
+        GOPATH: ${{ runner.home }}/go
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3
