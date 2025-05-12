@@ -2,6 +2,12 @@
 
 A terminal-based chat application with vi-like motion support built in Go.
 
+# UNDER CONSTRUCTION
+
+# UNDER CONSTRUCTION
+
+# UNDER CONSTRUCTION
+
 ## Features
 
 - **Terminal UI**: Clean, responsive interface that works in any terminal
