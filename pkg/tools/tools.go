@@ -54,7 +54,7 @@ func NewToolExecutor() *ToolExecutor {
 func (t *ToolExecutor) GetToolDefinitions() []backend.ClaudeTool {
 	return []backend.ClaudeTool{
 		{
-			Type:        "custom",
+			// The Type field should be omitted for custom tools on Bedrock
 			Name:        "find",
 			Description: "Execute the find command to search for files and directories",
 			InputSchema: map[string]interface{}{
@@ -93,7 +93,7 @@ func (t *ToolExecutor) GetToolDefinitions() []backend.ClaudeTool {
 			},
 		},
 		{
-			Type:        "custom",
+			// The Type field should be omitted for custom tools on Bedrock
 			Name:        "file_read",
 			Description: "Read the contents of a file",
 			InputSchema: map[string]interface{}{
@@ -116,7 +116,7 @@ func (t *ToolExecutor) GetToolDefinitions() []backend.ClaudeTool {
 			},
 		},
 		{
-			Type:        "custom",
+			// The Type field should be omitted for custom tools on Bedrock
 			Name:        "directory_list",
 			Description: "List files and directories in a specified path",
 			InputSchema: map[string]interface{}{

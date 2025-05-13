@@ -162,7 +162,9 @@ type ClaudeMessage struct {
 
 // ClaudeTool represents a tool definition for Claude models
 type ClaudeTool struct {
-	Type        string      `json:"type,omitempty"`    // "custom" or specific tool type
+	// Note: Bedrock does not accept the "type" field for custom tools
+	// Type is used only for special tools like computer_use
+	Type        string      `json:"type,omitempty"`
 	Name        string      `json:"name"`
 	Description string      `json:"description,omitempty"`
 	InputSchema interface{} `json:"input_schema,omitempty"`
