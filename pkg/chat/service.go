@@ -24,6 +24,7 @@ type ChatOptions struct {
 	MaxTokens            int
 	Temperature          float64
 	BackendOptions       map[string]any
+	EnableTools          bool              // Whether to enable tool support
 }
 
 // DefaultChatOptions returns the default chat options
@@ -36,6 +37,7 @@ func DefaultChatOptions() ChatOptions {
 		MaxTokens:          1000,
 		Temperature:        0.7,
 		BackendOptions:     make(map[string]any),
+		EnableTools:        true,  // Tools enabled by default
 	}
 }
 
@@ -46,6 +48,8 @@ type ChatService struct {
 	options        ChatOptions
 	systemPrompt   string
 	conversationMu sync.RWMutex
+	toolManager    *ToolManager
+	toolsEnabled   bool
 }
 
 // NewChatService creates a new chat service
@@ -64,11 +68,19 @@ func NewChatService(opts ChatOptions) (*ChatService, error) {
 		return nil, fmt.Errorf("failed to create chat backend: %w", err)
 	}
 	
+	// Create tool manager
+	toolManager := NewToolManager()
+
+	// Set tool availability based on options
+	toolManager.EnableTools(opts.EnableTools)
+
 	return &ChatService{
 		backend:      b,
 		messages:     []Message{},
 		options:      opts,
 		systemPrompt: opts.InitialSystemPrompt,
+		toolManager:  toolManager,
+		toolsEnabled: opts.EnableTools,
 	}, nil
 }
 
@@ -76,7 +88,7 @@ func NewChatService(opts ChatOptions) (*ChatService, error) {
 func (s *ChatService) SendMessage(content string) (Message, error) {
 	s.conversationMu.Lock()
 	defer s.conversationMu.Unlock()
-	
+
 	// Add user message to history
 	userMsg := Message{
 		Sender:  "user",
@@ -84,35 +96,109 @@ func (s *ChatService) SendMessage(content string) (Message, error) {
 		IsUser:  true,
 	}
 	s.messages = append(s.messages, userMsg)
-	
-	// Prepare messages for the backend
-	backendMessages := s.prepareBackendMessages()
-	
-	// Create chat request
-	req := backend.ChatRequest{
-		Messages:    backendMessages,
-		MaxTokens:   s.options.MaxTokens,
-		Temperature: s.options.Temperature,
+
+	// Process as a conversation with potential tool use
+	return s.processChatWithTools()
+}
+
+// processChatWithTools handles the full chat flow with potential tool usage
+func (s *ChatService) processChatWithTools() (Message, error) {
+	var toolResults []backend.ToolResult
+	maxToolCalls := 10 // Prevent infinite tool usage loops
+
+	for i := 0; i < maxToolCalls; i++ {
+		// Prepare messages for the backend
+		backendMessages := s.prepareBackendMessages()
+
+		// Create chat request with tools if enabled
+		req := backend.ChatRequest{
+			Messages:    backendMessages,
+			MaxTokens:   s.options.MaxTokens,
+			Temperature: s.options.Temperature,
+			Options:     make(map[string]any),
+		}
+
+		// Add tools if enabled
+		if s.toolsEnabled && s.toolManager != nil && s.toolManager.IsToolsEnabled() {
+			req.Options["tools"] = s.toolManager.GetTools()
+
+			// Add tool results if we have any
+			if len(toolResults) > 0 {
+				req.Options["tool_results"] = toolResults
+			}
+		}
+
+		// Send to backend
+		ctx := context.Background()
+		resp, err := s.backend.SendMessage(ctx, req)
+		if err != nil {
+			return Message{}, fmt.Errorf("backend error: %w", err)
+		}
+
+		// If the model requested a tool
+		if resp.ToolUse != nil && resp.FinishReason == "tool_use" {
+			// Add assistant message showing the tool request
+			toolMsg := Message{
+				Sender:  "assistant",
+				Content: fmt.Sprintf("I need to use the '%s' tool to help answer your question.", resp.ToolUse.Name),
+				IsUser:  false,
+			}
+			s.messages = append(s.messages, toolMsg)
+
+			// Execute the tool
+			result, err := s.toolManager.HandleToolUse(resp.ToolUse)
+			if err != nil {
+				// Add error message to history
+				errorMsg := Message{
+					Sender:  "system",
+					Content: fmt.Sprintf("Error executing tool: %v", err),
+					IsUser:  false,
+				}
+				s.messages = append(s.messages, errorMsg)
+
+				// Return error to user
+				return errorMsg, nil
+			}
+
+			// Add tool result message
+			resultContent := fmt.Sprintf("Tool '%s' executed successfully.", resp.ToolUse.Name)
+			resultMsg := Message{
+				Sender:  "system",
+				Content: resultContent,
+				IsUser:  false,
+			}
+			s.messages = append(s.messages, resultMsg)
+
+			// Store tool result for next request
+			toolResults = append(toolResults, *result)
+
+			// Continue to next iteration to send the tool result
+			continue
+		}
+
+		// No tool use, we have a final response
+		respMsg := Message{
+			Sender:  "assistant",
+			Content: resp.Content,
+			IsUser:  false,
+		}
+
+		// Add to history
+		s.messages = append(s.messages, respMsg)
+
+		// Return the final response
+		return respMsg, nil
 	}
-	
-	// Send to backend
-	ctx := context.Background()
-	resp, err := s.backend.SendMessage(ctx, req)
-	if err != nil {
-		return Message{}, fmt.Errorf("backend error: %w", err)
-	}
-	
-	// Create response message
-	respMsg := Message{
-		Sender:  "assistant",
-		Content: resp.Content,
+
+	// If we reached max tool calls, inform the user
+	errorMsg := Message{
+		Sender:  "system",
+		Content: "Exceeded maximum number of tool calls. The operation was halted.",
 		IsUser:  false,
 	}
-	
-	// Add to history
-	s.messages = append(s.messages, respMsg)
-	
-	return respMsg, nil
+	s.messages = append(s.messages, errorMsg)
+
+	return errorMsg, nil
 }
 
 // GetHistory returns the chat history
@@ -185,6 +271,25 @@ func (s *ChatService) prepareBackendMessages() []backend.Message {
 // GetBackendInfo returns information about the backend
 func (s *ChatService) GetBackendInfo() (string, string) {
 	return s.backend.Name(), s.backend.ModelID()
+}
+
+// EnableTools enables or disables the use of tools
+func (s *ChatService) EnableTools(enabled bool) {
+	s.conversationMu.Lock()
+	defer s.conversationMu.Unlock()
+
+	s.toolsEnabled = enabled
+	if s.toolManager != nil {
+		s.toolManager.EnableTools(enabled)
+	}
+}
+
+// IsToolsEnabled returns whether tools are enabled
+func (s *ChatService) IsToolsEnabled() bool {
+	s.conversationMu.RLock()
+	defer s.conversationMu.RUnlock()
+
+	return s.toolsEnabled
 }
 
 // Close closes the chat service and releases resources

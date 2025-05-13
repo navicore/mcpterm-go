@@ -26,25 +26,28 @@ type Config struct {
 type ChatConfig struct {
 	// Backend type (aws-bedrock, openai, local, mock)
 	BackendType string `json:"backend_type"`
-	
+
 	// Model ID
 	ModelID string `json:"model_id"`
-	
+
 	// Default system prompt
 	SystemPrompt string `json:"system_prompt"`
-	
+
 	// Maximum number of messages to include in the context
 	ContextWindowSize int `json:"context_window_size"`
-	
+
 	// Maximum number of tokens in the response
 	MaxTokens int `json:"max_tokens"`
-	
+
 	// Temperature for sampling (0.0-1.0)
 	Temperature float64 `json:"temperature"`
-	
+
 	// Top-P sampling parameter
 	TopP float64 `json:"top_p"`
-	
+
+	// Enable system tools for the model (find, file_read, directory_list)
+	EnableTools bool `json:"enable_tools"`
+
 	// AWS options
 	AWS AWSConfig `json:"aws"`
 }
@@ -93,6 +96,7 @@ func DefaultConfig() Config {
 			MaxTokens:         1000,
 			Temperature:       0.7,
 			TopP:              0.9,
+			EnableTools:       true,    // Enable system tools by default
 			AWS: AWSConfig{
 				Region:  "",  // Use default from AWS config
 				Profile: "",  // Use default profile
@@ -207,5 +211,6 @@ func (c *Config) GetChatOptions() chat.ChatOptions {
 		MaxTokens:           c.Chat.MaxTokens,
 		Temperature:         c.Chat.Temperature,
 		BackendOptions:      backendOptions,
+		EnableTools:         c.Chat.EnableTools,
 	}
 }
