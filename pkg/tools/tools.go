@@ -18,6 +18,9 @@ type FindInput struct {
 	Type      string   `json:"type,omitempty"`
 	Maxdepth  int      `json:"maxdepth,omitempty"`
 	Pattern   string   `json:"pattern,omitempty"`
+	Size      string   `json:"size,omitempty"`      // Size (e.g., "+1k" for > 1KB)
+	Mtime     string   `json:"mtime,omitempty"`     // Modified time (e.g., "-1" for last day)
+	Path      string   `json:"path,omitempty"`      // Path pattern to match/exclude
 	Args      []string `json:"args,omitempty"`
 }
 
@@ -80,6 +83,18 @@ func (t *ToolExecutor) GetToolDefinitions() []backend.ClaudeTool {
 					"pattern": map[string]interface{}{
 						"type":        "string",
 						"description": "Pattern to match file contents (uses grep)",
+					},
+					"size": map[string]interface{}{
+						"type":        "string",
+						"description": "Size of files to find (e.g., '+1k' for larger than 1KB, '-10M' for smaller than 10MB)",
+					},
+					"mtime": map[string]interface{}{
+						"type":        "string",
+						"description": "Modified time in days (e.g., '-1' for modified in the last day, '+7' for modified more than a week ago)",
+					},
+					"path": map[string]interface{}{
+						"type":        "string",
+						"description": "Path pattern to match or exclude (prefix with ! to exclude, e.g., '!*/target/*' to exclude target directories)",
 					},
 					"args": map[string]interface{}{
 						"type":        "array",
@@ -185,6 +200,25 @@ func (t *ToolExecutor) executeFind(input json.RawMessage) (interface{}, error) {
 
 	if params.Name != "" {
 		args = append(args, "-name", params.Name)
+	}
+
+	// Add macOS/BSD specific options
+	if params.Size != "" {
+		args = append(args, "-size", params.Size)
+	}
+
+	if params.Mtime != "" {
+		args = append(args, "-mtime", params.Mtime)
+	}
+
+	if params.Path != "" {
+		// Check if it's an exclusion path (starts with !)
+		if strings.HasPrefix(params.Path, "!") {
+			cleanPath := strings.TrimPrefix(params.Path, "!")
+			args = append(args, "-not", "-path", cleanPath)
+		} else {
+			args = append(args, "-path", params.Path)
+		}
 	}
 
 	// Add any additional args

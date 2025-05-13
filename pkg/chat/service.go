@@ -137,15 +137,7 @@ func (s *ChatService) processChatWithTools() (Message, error) {
 
 		// If the model requested a tool
 		if resp.ToolUse != nil && resp.FinishReason == "tool_use" {
-			// Add assistant message showing the tool request
-			toolMsg := Message{
-				Sender:  "assistant",
-				Content: fmt.Sprintf("I need to use the '%s' tool to help answer your question.", resp.ToolUse.Name),
-				IsUser:  false,
-			}
-			s.messages = append(s.messages, toolMsg)
-
-			// Execute the tool
+			// Execute the tool first before adding any messages
 			result, err := s.toolManager.HandleToolUse(resp.ToolUse)
 			if err != nil {
 				// Add error message to history
@@ -160,17 +152,26 @@ func (s *ChatService) processChatWithTools() (Message, error) {
 				return errorMsg, nil
 			}
 
-			// Add tool result message
-			resultContent := fmt.Sprintf("Tool '%s' executed successfully.", resp.ToolUse.Name)
-			resultMsg := Message{
-				Sender:  "system",
-				Content: resultContent,
+			// Add a single combined message about tool usage with more details
+			toolMsg := Message{
+				Sender:  "assistant",
+				Content: fmt.Sprintf("Using the '%s' tool to help answer your question. Tool request details: %s",
+					resp.ToolUse.Name,
+					string(resp.ToolUse.Input)),
 				IsUser:  false,
 			}
-			s.messages = append(s.messages, resultMsg)
+			s.messages = append(s.messages, toolMsg)
 
 			// Store tool result for next request
 			toolResults = append(toolResults, *result)
+
+			// Add a debug message showing the tool result with formatting
+			debugMsg := Message{
+				Sender:  "system",
+				Content: fmt.Sprintf("Debug - Tool '%s' result: ```json\n%s\n```", result.Name, string(result.Result)),
+				IsUser:  false,
+			}
+			s.messages = append(s.messages, debugMsg)
 
 			// Continue to next iteration to send the tool result
 			continue

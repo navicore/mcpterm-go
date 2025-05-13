@@ -447,10 +447,38 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 	if len(tools) > 0 {
 		claudeReq.Tools = tools
 	}
-	
+
 	// Add anthropic beta flag if provided (for computer use, etc.)
 	if anthropicBeta != "" {
 		claudeReq.AnthropicBeta = anthropicBeta
+	}
+
+	// Add tool results to messages if present
+	// For Claude on Bedrock, we need to add tool results as special messages
+	if len(toolResults) > 0 {
+		// For each tool result, add to the last message
+		for _, result := range toolResults {
+			// Add tool results if we have messages
+			if len(claudeMessages) > 0 {
+
+				// Format tool result as a message with tool result content
+				// Format following Anthropic's recommendations for Claude
+				toolResultContent := fmt.Sprintf(
+					"Tool '%s' returned the following result: ```json\n%s\n```\n\nPlease use this information to answer my original question.",
+					result.Name,
+					string(result.Result),
+				)
+
+				toolResultMsg := ClaudeMessage{
+					Role:    "user",
+					Content: toolResultContent,
+				}
+
+				// Add tool result message after the messages
+				claudeMessages = append(claudeMessages, toolResultMsg)
+				claudeReq.Messages = claudeMessages
+			}
+		}
 	}
 	
 	// Marshal the request to JSON
