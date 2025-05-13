@@ -86,17 +86,17 @@ if resp.ToolUse != nil && resp.FinishReason == "tool_use" {
 	if err := json.Unmarshal(resp.ToolUse.Input, &toolInput); err != nil {
 		// Handle error
 	}
-	
+
 	// Execute the actual tool (in this case, get weather data)
 	weatherData := getWeatherData(toolInput["location"].(string),
 	                             toolInput["unit"].(string))
-	
+
 	// Format tool result
 	toolResult := ToolResult{
 		Name:   toolName,
 		Result: json.RawMessage(weatherData),
 	}
-	
+
 	// Send follow-up request with tool result
 	followUpReq := ChatRequest{
 		Messages: append(req.Messages,
@@ -108,13 +108,13 @@ if resp.ToolUse != nil && resp.FinishReason == "tool_use" {
 			"tool_results": []ToolResult{toolResult},
 		},
 	}
-	
+
 	// Get final response from Claude with the weather information
 	finalResp, err := backend.SendMessage(ctx, followUpReq)
 	if err != nil {
 		// Handle error
 	}
-	
+
 	// finalResp.Content now contains the natural language response
 	// with weather information incorporated
 }
@@ -154,8 +154,8 @@ type ClaudeContentBlock struct {
 
 // ClaudeMessage represents a message in the Claude format
 type ClaudeMessage struct {
-	Role    string              `json:"role"`
-	Content string              `json:"content,omitempty"`
+	Role    string `json:"role"`
+	Content string `json:"content,omitempty"`
 	// Content can be either a string or an array of content blocks,
 	// we handle this dynamically in the code
 }
@@ -186,10 +186,10 @@ type AnthropicRequest struct {
 
 // ToolUseContentBlock represents a tool use block in Claude's response
 type ToolUseContentBlock struct {
-	Type    string          `json:"type"` // Will be "tool_use"
-	ID      string          `json:"id"`
-	Name    string          `json:"name"`
-	Input   json.RawMessage `json:"input"` // Raw JSON to be parsed based on tool schema
+	Type  string          `json:"type"` // Will be "tool_use"
+	ID    string          `json:"id"`
+	Name  string          `json:"name"`
+	Input json.RawMessage `json:"input"` // Raw JSON to be parsed based on tool schema
 }
 
 // ToolResultContentBlock represents a tool result block in Claude's response
@@ -208,13 +208,13 @@ type TextContentBlock struct {
 // ContentBlock represents a generic content block in Claude's response
 // We use this for unmarshaling response content
 type ContentBlock struct {
-	Type    string          `json:"type"`
-	ID      string          `json:"id,omitempty"`
-	Name    string          `json:"name,omitempty"`
-	Text    string          `json:"text,omitempty"`
-	Input   json.RawMessage `json:"input,omitempty"`
-	ToolID  string          `json:"tool_id,omitempty"`
-	Result  json.RawMessage `json:"result,omitempty"`
+	Type   string          `json:"type"`
+	ID     string          `json:"id,omitempty"`
+	Name   string          `json:"name,omitempty"`
+	Text   string          `json:"text,omitempty"`
+	Input  json.RawMessage `json:"input,omitempty"`
+	ToolID string          `json:"tool_id,omitempty"`
+	Result json.RawMessage `json:"result,omitempty"`
 }
 
 // AnthropicResponse represents the response format from Claude models in Bedrock
@@ -358,19 +358,16 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 	// Convert to Anthropic format
 	claudeMessages := make([]ClaudeMessage, 0, len(req.Messages))
 	var systemPrompt string
-	
+
 	for _, msg := range req.Messages {
 		if msg.Role == "system" {
 			// Claude expects system prompts in a separate field
 			systemPrompt = msg.Content
 		} else {
-			claudeMessages = append(claudeMessages, ClaudeMessage{
-				Role:    msg.Role,
-				Content: msg.Content,
-			})
+			claudeMessages = append(claudeMessages, ClaudeMessage(msg))
 		}
 	}
-	
+
 	// Set parameters
 	maxTokens := req.MaxTokens
 	if maxTokens <= 0 {
@@ -398,14 +395,14 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 	} else if topP > 1 {
 		topP = 1
 	}
-	
+
 	// Extract any Claude-specific options
 	var topK int
 	var stopSequences []string
 	var tools []ClaudeTool
 	var anthropicBeta string
 	var toolResults []ToolResult
-	
+
 	if req.Options != nil {
 		if val, ok := req.Options["top_k"].(int); ok {
 			topK = val
@@ -423,7 +420,7 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 			toolResults = val
 		}
 	}
-	
+
 	// Create the Claude request payload
 	claudeReq := AnthropicRequest{
 		AnthropicVersion: AnthropicVersion,
@@ -433,16 +430,16 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 		TopP:             topP,
 		System:           systemPrompt,
 	}
-	
+
 	// Add optional parameters
 	if topK > 0 {
 		claudeReq.TopK = topK
 	}
-	
+
 	if len(stopSequences) > 0 {
 		claudeReq.StopSequences = stopSequences
 	}
-	
+
 	// Add tools if provided
 	if len(tools) > 0 {
 		claudeReq.Tools = tools
@@ -480,7 +477,7 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 			}
 		}
 	}
-	
+
 	// Marshal the request to JSON
 	reqJSON, err := json.Marshal(claudeReq)
 	if err != nil {
@@ -490,7 +487,7 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 			err,
 		)
 	}
-	
+
 	// Create a context with timeout for the API call
 	apiCtx, cancel := context.WithTimeout(ctx, 90*time.Second) // Increased timeout
 	defer cancel()
@@ -508,20 +505,20 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 	maxRetries := 5
 	baseDelay := 500 * time.Millisecond
 	var retryErr error
-	
+
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		bedrockResp, retryErr = b.client.InvokeModel(apiCtx, bedrockReq)
-		
+
 		if retryErr == nil {
 			// Success, break the retry loop
 			break
 		}
-		
+
 		// Check if we should retry based on error type
 		mappedErr := mapBedrockError(retryErr)
 		if bErr, ok := mappedErr.(*BackendError); ok && bErr.Retryable {
 			// Calculate backoff delay with jitter
-			delay := baseDelay * time.Duration(1<<attempt) // Exponential backoff
+			delay := baseDelay * time.Duration(1<<attempt)         // Exponential backoff
 			jitter := time.Duration(rand.Int63n(int64(delay) / 2)) // Add some randomness
 			totalDelay := delay + jitter
 
@@ -544,7 +541,7 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 			break
 		}
 	}
-	
+
 	// Handle any errors after all retry attempts
 	if retryErr != nil {
 		// Check for context timeout
@@ -558,7 +555,7 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 
 		return ChatResponse{Error: retryErr}, mapBedrockError(retryErr)
 	}
-	
+
 	// Parse the response
 	var claudeResp AnthropicResponse
 	if err := json.Unmarshal(bedrockResp.Body, &claudeResp); err != nil {
@@ -568,11 +565,11 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 			err,
 		)
 	}
-	
+
 	// Process the response content
 	var content strings.Builder
 	var toolUse *ToolUse
-	
+
 	for _, c := range claudeResp.Content {
 		switch c.Type {
 		case "text":
@@ -585,13 +582,13 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 			}
 		}
 	}
-	
+
 	// Build the response
 	usage := make(map[string]int)
 	usage["prompt_tokens"] = claudeResp.Usage.InputTokens
 	usage["completion_tokens"] = claudeResp.Usage.OutputTokens
 	usage["total_tokens"] = claudeResp.Usage.InputTokens + claudeResp.Usage.OutputTokens
-	
+
 	return ChatResponse{
 		Content:      content.String(),
 		FinishReason: claudeResp.StopReason,
@@ -724,3 +721,4 @@ func mapBedrockError(err error) error {
 		err,
 	)
 }
+
