@@ -2,6 +2,7 @@ package backend
 
 import (
 	"context"
+	"encoding/json"
 )
 
 // Message represents a conversation message
@@ -19,12 +20,26 @@ type ChatRequest struct {
 	Options     map[string]any     // Backend-specific options
 }
 
+// ToolUse represents a tool call from the model
+type ToolUse struct {
+	Name  string          // Name of the tool to use
+	Input json.RawMessage // Raw JSON input to the tool
+}
+
+// ToolResult represents the result of a tool execution
+type ToolResult struct {
+	Name   string          // Name of the tool that was used
+	Result json.RawMessage // Raw JSON result from the tool
+}
+
 // ChatResponse contains the response from a chat completion
 type ChatResponse struct {
-	Content     string             // The generated text
-	FinishReason string            // Reason why generation stopped
-	Usage       map[string]int     // Token usage statistics
-	Error       error              // Any error that occurred
+	Content      string             // The generated text
+	FinishReason string             // Reason why generation stopped ("stop", "length", "tool_use", etc.)
+	Usage        map[string]int     // Token usage statistics
+	Error        error              // Any error that occurred
+	ToolUse      *ToolUse           // Tool use request from the model, if any
+	ToolResults  []ToolResult       // Results from previous tool usage
 }
 
 // BackendType represents the type of chat backend

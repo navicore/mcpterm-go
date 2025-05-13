@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,10 +19,10 @@ const (
 	// Claude models - AWS Bedrock model IDs
 	// Some models use the us.anthropic.* prefix (US region specific models)
 	// Others use the anthropic.* prefix (available in multiple regions)
-	ModelClaude37Sonnet      = "us.anthropic.claude-3-7-sonnet-20250219-v1:0"  // US region model
-	ModelClaude3Sonnet       = "anthropic.claude-3-sonnet-20240229-v1:0"       // Multi-region model
-	ModelClaude3Haiku        = "anthropic.claude-3-haiku-20240307-v1:0"        // Multi-region model
-	ModelClaude3Opus         = "anthropic.claude-3-opus-20240229-v1:0"         // Multi-region model
+	ModelClaude37Sonnet = "us.anthropic.claude-3-7-sonnet-20250219-v1:0" // US region model
+	ModelClaude3Sonnet  = "anthropic.claude-3-sonnet-20240229-v1:0"      // Multi-region model
+	ModelClaude3Haiku   = "anthropic.claude-3-haiku-20240307-v1:0"       // Multi-region model
+	ModelClaude3Opus    = "anthropic.claude-3-opus-20240229-v1:0"        // Multi-region model
 
 	// Default parameters
 	DefaultMaxTokens   = 4096
@@ -27,24 +30,144 @@ const (
 	DefaultTopP        = 0.9
 
 	// Anthropic API version for Bedrock
-	AnthropicVersion   = "bedrock-2023-05-31"
+	AnthropicVersion = "bedrock-2023-05-31"
 )
 
 func init() {
+	// Random is initialized by default in Go 1.20+
 	RegisterBackend(BackendAWSBedrock, NewBedrockBackend)
 }
 
+// Example of how to use tools with Claude models in AWS Bedrock:
+/*
+// Example 1: Define a weather tool and send it to Claude
+weatherTool := ClaudeTool{
+	Type:        "custom",  // "custom" is default for function-calling tools
+	Name:        "get_weather",
+	Description: "Get the current weather for a location",
+	InputSchema: map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"location": map[string]interface{}{
+				"type":        "string",
+				"description": "City and state (e.g., 'San Francisco, CA')",
+			},
+			"unit": map[string]interface{}{
+				"type":        "string",
+				"enum":        []string{"celsius", "fahrenheit"},
+				"description": "Temperature unit",
+			},
+		},
+		"required": []string{"location"},
+	},
+}
+
+// Create chat request with tool
+req := ChatRequest{
+	Messages: []Message{
+		{Role: "user", Content: "What's the weather like in San Francisco?"},
+	},
+	Options: map[string]any{
+		"tools": []ClaudeTool{weatherTool},
+	},
+}
+
+// Send request to Claude
+resp, err := backend.SendMessage(ctx, req)
+if err != nil {
+	// Handle error
+}
+
+// Check if Claude wants to use a tool
+if resp.ToolUse != nil && resp.FinishReason == "tool_use" {
+	// Extract tool request details
+	toolName := resp.ToolUse.Name
+	var toolInput map[string]interface{}
+	if err := json.Unmarshal(resp.ToolUse.Input, &toolInput); err != nil {
+		// Handle error
+	}
+	
+	// Execute the actual tool (in this case, get weather data)
+	weatherData := getWeatherData(toolInput["location"].(string),
+	                             toolInput["unit"].(string))
+	
+	// Format tool result
+	toolResult := ToolResult{
+		Name:   toolName,
+		Result: json.RawMessage(weatherData),
+	}
+	
+	// Send follow-up request with tool result
+	followUpReq := ChatRequest{
+		Messages: append(req.Messages,
+			Message{Role: "assistant", Content: "I need to check the weather."},
+			Message{Role: "user", Content: "I got the weather data for you."},
+		),
+		Options: map[string]any{
+			"tools": []ClaudeTool{weatherTool},
+			"tool_results": []ToolResult{toolResult},
+		},
+	}
+	
+	// Get final response from Claude with the weather information
+	finalResp, err := backend.SendMessage(ctx, followUpReq)
+	if err != nil {
+		// Handle error
+	}
+	
+	// finalResp.Content now contains the natural language response
+	// with weather information incorporated
+}
+
+// Example 2: Computer Use with beta features
+req := ChatRequest{
+	Messages: []Message{
+		{Role: "user", Content: "Please help me analyze this image and extract data from it."},
+	},
+	Options: map[string]any{
+		"tools": []ClaudeTool{
+			{
+				Type: "computer_20241022",
+				Name: "computer",
+				// Optional display size information
+				// "display_height_px": 1080,
+				// "display_width_px": 1920,
+			},
+		},
+		"anthropic_beta": "computer-use-2024-10-22",
+	},
+}
+*/
+
 // BedrockBackend implements the Backend interface for AWS Bedrock
 type BedrockBackend struct {
-	client    *bedrockruntime.Client
-	config    Config
-	modelID   string
+	client  *bedrockruntime.Client
+	config  Config
+	modelID string
+}
+
+// ClaudeContentBlock represents a block of content in a Claude message
+type ClaudeContentBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
 }
 
 // ClaudeMessage represents a message in the Claude format
 type ClaudeMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string              `json:"role"`
+	Content string              `json:"content,omitempty"`
+	// Content can be either a string or an array of content blocks,
+	// we handle this dynamically in the code
+}
+
+// ClaudeTool represents a tool definition for Claude models
+type ClaudeTool struct {
+	// Note: Bedrock does not accept the "type" field for custom tools
+	// Type is used only for special tools like computer_use
+	Type        string      `json:"type,omitempty"`
+	Name        string      `json:"name"`
+	Description string      `json:"description,omitempty"`
+	InputSchema interface{} `json:"input_schema,omitempty"`
 }
 
 // AnthropicRequest represents the request format for Claude models in Bedrock
@@ -57,20 +180,52 @@ type AnthropicRequest struct {
 	TopK             int             `json:"top_k,omitempty"`
 	StopSequences    []string        `json:"stop_sequences,omitempty"`
 	System           string          `json:"system,omitempty"`
+	Tools            []ClaudeTool    `json:"tools,omitempty"`
+	AnthropicBeta    string          `json:"anthropic_beta,omitempty"` // For computer use and other beta features
+}
+
+// ToolUseContentBlock represents a tool use block in Claude's response
+type ToolUseContentBlock struct {
+	Type    string          `json:"type"` // Will be "tool_use"
+	ID      string          `json:"id"`
+	Name    string          `json:"name"`
+	Input   json.RawMessage `json:"input"` // Raw JSON to be parsed based on tool schema
+}
+
+// ToolResultContentBlock represents a tool result block in Claude's response
+type ToolResultContentBlock struct {
+	Type   string          `json:"type"` // Will be "tool_result"
+	ToolID string          `json:"tool_id"`
+	Result json.RawMessage `json:"result"` // Raw JSON
+}
+
+// TextContentBlock represents a regular text block in Claude's response
+type TextContentBlock struct {
+	Type string `json:"type"` // Will be "text"
+	Text string `json:"text"`
+}
+
+// ContentBlock represents a generic content block in Claude's response
+// We use this for unmarshaling response content
+type ContentBlock struct {
+	Type    string          `json:"type"`
+	ID      string          `json:"id,omitempty"`
+	Name    string          `json:"name,omitempty"`
+	Text    string          `json:"text,omitempty"`
+	Input   json.RawMessage `json:"input,omitempty"`
+	ToolID  string          `json:"tool_id,omitempty"`
+	Result  json.RawMessage `json:"result,omitempty"`
 }
 
 // AnthropicResponse represents the response format from Claude models in Bedrock
 type AnthropicResponse struct {
-	ID           string `json:"id"`
-	Type         string `json:"type"`
-	Role         string `json:"role"`
-	Content      []struct {
-		Type  string `json:"type"`
-		Text  string `json:"text"`
-	} `json:"content"`
-	Model        string `json:"model"`
-	StopReason   string `json:"stop_reason"`
-	StopSequence string `json:"stop_sequence"`
+	ID           string         `json:"id"`
+	Type         string         `json:"type"`
+	Role         string         `json:"role"`
+	Content      []ContentBlock `json:"content"`
+	Model        string         `json:"model"`
+	StopReason   string         `json:"stop_reason"` // Can be "end_turn", "tool_use", etc.
+	StopSequence string         `json:"stop_sequence"`
 	Usage        struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
@@ -131,6 +286,10 @@ func NewBedrockBackend(config Config) (Backend, error) {
 func LoadAWSConfig(ctx context.Context, options map[string]any) (aws.Config, error) {
 	loadOpts := []func(*config.LoadOptions) error{}
 
+	// Disable EC2 Instance Metadata Service (IMDS) for local development
+	// This prevents hanging when running on a local machine
+	loadOpts = append(loadOpts, config.WithEC2IMDSEndpoint("")) // Empty endpoint disables IMDS
+
 	// Apply custom region if specified
 	if region, ok := options["region"].(string); ok && region != "" {
 		loadOpts = append(loadOpts, config.WithRegion(region))
@@ -156,14 +315,21 @@ func LoadAWSConfig(ctx context.Context, options map[string]any) (aws.Config, err
 		}
 	}
 
-	// Setting shared config files
-	loadOpts = append(loadOpts, config.WithSharedConfigFiles([]string{
-		"~/.aws/config",
-	}))
+	// Setting shared config files with correct paths
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		configPath := filepath.Join(homeDir, ".aws", "config")
+		credentialsPath := filepath.Join(homeDir, ".aws", "credentials")
 
-	loadOpts = append(loadOpts, config.WithSharedCredentialsFiles([]string{
-		"~/.aws/credentials",
-	}))
+		// Only add if files exist
+		if _, err := os.Stat(configPath); err == nil {
+			loadOpts = append(loadOpts, config.WithSharedConfigFiles([]string{configPath}))
+		}
+
+		if _, err := os.Stat(credentialsPath); err == nil {
+			loadOpts = append(loadOpts, config.WithSharedCredentialsFiles([]string{credentialsPath}))
+		}
+	}
 
 	// Set maximum retry attempts for AWS operations
 	loadOpts = append(loadOpts, config.WithRetryMaxAttempts(5))
@@ -236,6 +402,9 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 	// Extract any Claude-specific options
 	var topK int
 	var stopSequences []string
+	var tools []ClaudeTool
+	var anthropicBeta string
+	var toolResults []ToolResult
 	
 	if req.Options != nil {
 		if val, ok := req.Options["top_k"].(int); ok {
@@ -243,6 +412,15 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 		}
 		if val, ok := req.Options["stop_sequences"].([]string); ok {
 			stopSequences = val
+		}
+		if val, ok := req.Options["tools"].([]ClaudeTool); ok {
+			tools = val
+		}
+		if val, ok := req.Options["anthropic_beta"].(string); ok {
+			anthropicBeta = val
+		}
+		if val, ok := req.Options["tool_results"].([]ToolResult); ok {
+			toolResults = val
 		}
 	}
 	
@@ -256,12 +434,51 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 		System:           systemPrompt,
 	}
 	
+	// Add optional parameters
 	if topK > 0 {
 		claudeReq.TopK = topK
 	}
 	
 	if len(stopSequences) > 0 {
 		claudeReq.StopSequences = stopSequences
+	}
+	
+	// Add tools if provided
+	if len(tools) > 0 {
+		claudeReq.Tools = tools
+	}
+
+	// Add anthropic beta flag if provided (for computer use, etc.)
+	if anthropicBeta != "" {
+		claudeReq.AnthropicBeta = anthropicBeta
+	}
+
+	// Add tool results to messages if present
+	// For Claude on Bedrock, we need to add tool results as special messages
+	if len(toolResults) > 0 {
+		// For each tool result, add to the last message
+		for _, result := range toolResults {
+			// Add tool results if we have messages
+			if len(claudeMessages) > 0 {
+
+				// Format tool result as a message with tool result content
+				// Format following Anthropic's recommendations for Claude
+				toolResultContent := fmt.Sprintf(
+					"Tool '%s' returned the following result: ```json\n%s\n```\n\nPlease use this information to answer my original question.",
+					result.Name,
+					string(result.Result),
+				)
+
+				toolResultMsg := ClaudeMessage{
+					Role:    "user",
+					Content: toolResultContent,
+				}
+
+				// Add tool result message after the messages
+				claudeMessages = append(claudeMessages, toolResultMsg)
+				claudeReq.Messages = claudeMessages
+			}
+		}
 	}
 	
 	// Marshal the request to JSON
@@ -275,10 +492,10 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 	}
 	
 	// Create a context with timeout for the API call
-	apiCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	apiCtx, cancel := context.WithTimeout(ctx, 90*time.Second) // Increased timeout
 	defer cancel()
 
-	// Call the Bedrock API
+	// Call the Bedrock API with exponential backoff retry
 	bedrockReq := &bedrockruntime.InvokeModelInput{
 		ModelId:     aws.String(b.modelID),
 		ContentType: aws.String("application/json"),
@@ -286,18 +503,60 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 		Body:        reqJSON,
 	}
 
-	bedrockResp, err := b.client.InvokeModel(apiCtx, bedrockReq)
-	if err != nil {
+	// Implement retry with exponential backoff
+	var bedrockResp *bedrockruntime.InvokeModelOutput
+	maxRetries := 5
+	baseDelay := 500 * time.Millisecond
+	var retryErr error
+	
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		bedrockResp, retryErr = b.client.InvokeModel(apiCtx, bedrockReq)
+		
+		if retryErr == nil {
+			// Success, break the retry loop
+			break
+		}
+		
+		// Check if we should retry based on error type
+		mappedErr := mapBedrockError(retryErr)
+		if bErr, ok := mappedErr.(*BackendError); ok && bErr.Retryable {
+			// Calculate backoff delay with jitter
+			delay := baseDelay * time.Duration(1<<attempt) // Exponential backoff
+			jitter := time.Duration(rand.Int63n(int64(delay) / 2)) // Add some randomness
+			totalDelay := delay + jitter
+
+			// Check if we have enough time left in our context
+			if apiCtx.Err() == nil {
+				select {
+				case <-time.After(totalDelay):
+					// Retry after delay
+					continue
+				case <-apiCtx.Done():
+					// Context expired during wait, exit retry loop
+					break
+				}
+			} else {
+				// Context already expired, exit retry loop
+				break
+			}
+		} else {
+			// Non-retryable error, exit retry loop
+			break
+		}
+	}
+	
+	// Handle any errors after all retry attempts
+	if retryErr != nil {
 		// Check for context timeout
 		if apiCtx.Err() == context.DeadlineExceeded {
-			return ChatResponse{Error: err}, NewBackendError(
+			return ChatResponse{Error: retryErr}, NewBackendError(
 				ErrCodeServiceUnavailable,
-				"request to AWS Bedrock timed out after 60 seconds",
-				err,
+				"request to AWS Bedrock timed out after 90 seconds with retries",
+				retryErr,
 			)
 		}
 
-		return ChatResponse{Error: err}, mapBedrockError(err)
+		return ChatResponse{Error: retryErr}, mapBedrockError(retryErr)
 	}
 	
 	// Parse the response
@@ -310,11 +569,20 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 		)
 	}
 	
-	// Extract content from the response
+	// Process the response content
 	var content strings.Builder
+	var toolUse *ToolUse
+	
 	for _, c := range claudeResp.Content {
-		if c.Type == "text" {
+		switch c.Type {
+		case "text":
 			content.WriteString(c.Text)
+		case "tool_use":
+			// If we encounter a tool_use block, extract the tool call information
+			toolUse = &ToolUse{
+				Name:  c.Name,
+				Input: c.Input,
+			}
 		}
 	}
 	
@@ -325,9 +593,11 @@ func (b *BedrockBackend) SendMessage(ctx context.Context, req ChatRequest) (Chat
 	usage["total_tokens"] = claudeResp.Usage.InputTokens + claudeResp.Usage.OutputTokens
 	
 	return ChatResponse{
-		Content:     content.String(),
+		Content:      content.String(),
 		FinishReason: claudeResp.StopReason,
-		Usage:       usage,
+		Usage:        usage,
+		ToolUse:      toolUse,
+		ToolResults:  toolResults,
 	}, nil
 }
 
@@ -344,9 +614,9 @@ func mapBedrockError(err error) error {
 
 	// Throttling and rate limiting errors
 	if strings.Contains(errMsg, "rate limit") ||
-	   strings.Contains(errMsg, "throttled") ||
-	   strings.Contains(errMsg, "ThrottlingException") ||
-	   strings.Contains(errMsg, "TooManyRequestsException") {
+		strings.Contains(errMsg, "throttled") ||
+		strings.Contains(errMsg, "ThrottlingException") ||
+		strings.Contains(errMsg, "TooManyRequestsException") {
 		return NewBackendError(
 			ErrCodeRateLimited,
 			"API rate limit exceeded. Please try again in a few moments.",
@@ -356,10 +626,10 @@ func mapBedrockError(err error) error {
 
 	// Authentication and permission errors
 	if strings.Contains(errMsg, "AccessDeniedException") ||
-	   strings.Contains(errMsg, "AuthorizationException") ||
-	   strings.Contains(errMsg, "UnrecognizedClientException") ||
-	   strings.Contains(errMsg, "InvalidSignatureException") ||
-	   strings.Contains(errMsg, "not authorized") {
+		strings.Contains(errMsg, "AuthorizationException") ||
+		strings.Contains(errMsg, "UnrecognizedClientException") ||
+		strings.Contains(errMsg, "InvalidSignatureException") ||
+		strings.Contains(errMsg, "not authorized") {
 		return NewBackendError(
 			ErrCodeAuthentication,
 			"Authentication failed. Please check your AWS credentials and permissions.",
@@ -369,9 +639,9 @@ func mapBedrockError(err error) error {
 
 	// Content filtering errors
 	if strings.Contains(errMsg, "content filter") ||
-	   strings.Contains(errMsg, "safety") ||
-	   strings.Contains(errMsg, "ContentFilterException") ||
-	   strings.Contains(errMsg, "violated content policy") {
+		strings.Contains(errMsg, "safety") ||
+		strings.Contains(errMsg, "ContentFilterException") ||
+		strings.Contains(errMsg, "violated content policy") {
 		return NewBackendError(
 			ErrCodeContentFiltered,
 			"Content was filtered due to safety or content policy concerns.",
@@ -381,9 +651,9 @@ func mapBedrockError(err error) error {
 
 	// Context length and token limit errors
 	if strings.Contains(errMsg, "context length") ||
-	   strings.Contains(errMsg, "token limit") ||
-	   strings.Contains(errMsg, "too many tokens") ||
-	   strings.Contains(errMsg, "ModelTokenLimitExceededException") {
+		strings.Contains(errMsg, "token limit") ||
+		strings.Contains(errMsg, "too many tokens") ||
+		strings.Contains(errMsg, "ModelTokenLimitExceededException") {
 		return NewBackendError(
 			ErrCodeContextLengthExceeded,
 			"Input exceeded maximum context length for the model.",
@@ -393,9 +663,9 @@ func mapBedrockError(err error) error {
 
 	// Validation and invalid parameter errors
 	if strings.Contains(errMsg, "validation") ||
-	   strings.Contains(errMsg, "invalid") ||
-	   strings.Contains(errMsg, "ValidationException") ||
-	   strings.Contains(errMsg, "InvalidRequestException") {
+		strings.Contains(errMsg, "invalid") ||
+		strings.Contains(errMsg, "ValidationException") ||
+		strings.Contains(errMsg, "InvalidRequestException") {
 		return NewBackendError(
 			ErrCodeInvalidRequest,
 			"Invalid request parameters. Please check your model configuration.",
@@ -405,10 +675,10 @@ func mapBedrockError(err error) error {
 
 	// Network and connectivity errors
 	if strings.Contains(errMsg, "connection") ||
-	   strings.Contains(errMsg, "timeout") ||
-	   strings.Contains(errMsg, "network") ||
-	   strings.Contains(errMsg, "dial") ||
-	   strings.Contains(errMsg, "EOF") {
+		strings.Contains(errMsg, "timeout") ||
+		strings.Contains(errMsg, "network") ||
+		strings.Contains(errMsg, "dial") ||
+		strings.Contains(errMsg, "EOF") {
 		return NewBackendError(
 			ErrCodeNetwork,
 			"Network error occurred. Please check your internet connection.",
@@ -418,9 +688,9 @@ func mapBedrockError(err error) error {
 
 	// Service unavailable errors
 	if strings.Contains(errMsg, "ServiceUnavailableException") ||
-	   strings.Contains(errMsg, "service unavailable") ||
-	   strings.Contains(errMsg, "InternalServerException") ||
-	   strings.Contains(errMsg, "500") {
+		strings.Contains(errMsg, "service unavailable") ||
+		strings.Contains(errMsg, "InternalServerException") ||
+		strings.Contains(errMsg, "500") {
 		return NewBackendError(
 			ErrCodeServiceUnavailable,
 			"AWS Bedrock service is currently unavailable. Please try again later.",
@@ -438,7 +708,7 @@ func mapBedrockError(err error) error {
 	}
 
 	if strings.Contains(errMsg, "ModelNotFoundException") ||
-	   strings.Contains(errMsg, "model not found") {
+		strings.Contains(errMsg, "model not found") {
 		return NewBackendError(
 			ErrCodeInvalidConfiguration,
 			fmt.Sprintf("Model not found: %s. Please check the model ID and region.",
