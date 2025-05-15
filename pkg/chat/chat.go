@@ -4,8 +4,8 @@ import (
 	"strings"
 )
 
-// SimpleMessage represents a chat message in the simple chat service
-type SimpleMessage struct {
+// Message represents a chat message
+type Message struct {
 	Sender  string
 	Content string
 	IsUser  bool
@@ -13,26 +13,32 @@ type SimpleMessage struct {
 
 // ChatServiceInterface defines the interface for chat functionality
 type ChatServiceInterface interface {
-	SendMessage(content string) (SimpleMessage, error)
-	GetHistory() []SimpleMessage
+	SendMessage(content string) (Message, error)
+	GetHistory() []Message
+	GetBackendInfo() (string, string)
+	Clear() error
+	UpdateSystemPrompt(prompt string)
+	EnableTools(enabled bool)
+	IsToolsEnabled() bool
+	Close() error
 }
 
 // SimpleChatService is a basic implementation of ChatServiceInterface
 type SimpleChatService struct {
-	history []SimpleMessage
+	history []Message
 }
 
 // NewSimpleChatService creates a new chat service instance
 func NewSimpleChatService() *SimpleChatService {
 	return &SimpleChatService{
-		history: []SimpleMessage{},
+		history: []Message{},
 	}
 }
 
 // SendMessage sends a message and returns a response
-func (s *SimpleChatService) SendMessage(content string) (SimpleMessage, error) {
+func (s *SimpleChatService) SendMessage(content string) (Message, error) {
 	// Add user message to history
-	userMsg := SimpleMessage{
+	userMsg := Message{
 		Sender:  "You",
 		Content: content,
 		IsUser:  true,
@@ -114,7 +120,7 @@ func (s *SimpleChatService) SendMessage(content string) (SimpleMessage, error) {
 			"How can I help you with that? Type `help` for a list of commands."
 	}
 
-	botMsg := SimpleMessage{
+	botMsg := Message{
 		Sender:  "Assistant",
 		Content: response,
 		IsUser:  false,
@@ -125,6 +131,37 @@ func (s *SimpleChatService) SendMessage(content string) (SimpleMessage, error) {
 }
 
 // GetHistory returns the chat history
-func (s *SimpleChatService) GetHistory() []SimpleMessage {
+func (s *SimpleChatService) GetHistory() []Message {
 	return s.history
+}
+
+// GetBackendInfo returns information about the backend
+func (s *SimpleChatService) GetBackendInfo() (string, string) {
+	return "Mock", "simple"
+}
+
+// Clear clears the chat history
+func (s *SimpleChatService) Clear() error {
+	s.history = []Message{}
+	return nil
+}
+
+// UpdateSystemPrompt updates the system prompt (no-op for SimpleChatService)
+func (s *SimpleChatService) UpdateSystemPrompt(prompt string) {
+	// No-op for SimpleChatService
+}
+
+// EnableTools enables or disables the use of tools (no-op for SimpleChatService)
+func (s *SimpleChatService) EnableTools(enabled bool) {
+	// No-op for SimpleChatService
+}
+
+// IsToolsEnabled returns whether tools are enabled
+func (s *SimpleChatService) IsToolsEnabled() bool {
+	return false
+}
+
+// Close closes the chat service and releases resources
+func (s *SimpleChatService) Close() error {
+	return nil
 }

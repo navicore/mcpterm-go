@@ -4,6 +4,7 @@
 *.dll
 *.so
 *.dylib
+mcp
 mcpterm
 mcpterm-go
 mcpterm-linux-amd64

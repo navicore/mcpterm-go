@@ -6,16 +6,16 @@ import (
 
 // Error codes
 const (
-	ErrCodeUnsupportedBackend   = "UnsupportedBackend"
-	ErrCodeInvalidConfiguration = "InvalidConfiguration"
-	ErrCodeAuthentication       = "AuthenticationError"
-	ErrCodeNetwork              = "NetworkError"
-	ErrCodeRateLimited          = "RateLimitedError"
-	ErrCodeServiceUnavailable   = "ServiceUnavailableError"
-	ErrCodeInvalidRequest       = "InvalidRequestError"
+	ErrCodeUnsupportedBackend    = "UnsupportedBackend"
+	ErrCodeInvalidConfiguration  = "InvalidConfiguration"
+	ErrCodeAuthentication        = "AuthenticationError"
+	ErrCodeNetwork               = "NetworkError"
+	ErrCodeRateLimited           = "RateLimitedError"
+	ErrCodeServiceUnavailable    = "ServiceUnavailableError"
+	ErrCodeInvalidRequest        = "InvalidRequestError"
 	ErrCodeContextLengthExceeded = "ContextLengthExceededError"
-	ErrCodeContentFiltered      = "ContentFilteredError"
-	ErrCodeUnknown              = "UnknownError"
+	ErrCodeContentFiltered       = "ContentFilteredError"
+	ErrCodeUnknown               = "UnknownError"
 )
 
 // BackendError represents an error from a chat backend
@@ -47,7 +47,7 @@ func NewBackendError(code string, message string, cause error) *BackendError {
 	case ErrCodeNetwork, ErrCodeRateLimited, ErrCodeServiceUnavailable:
 		retryable = true
 	}
-	
+
 	return &BackendError{
 		Code:      code,
 		Message:   message,

@@ -9,12 +9,12 @@ import (
 
 // Selection represents a text selection in the viewport
 type Selection struct {
-	Active      bool
-	StartLine   int
-	StartCol    int
-	EndLine     int
-	EndCol      int
-	Content     []string  // Content of the viewport split by lines
+	Active       bool
+	StartLine    int
+	StartCol     int
+	EndLine      int
+	EndCol       int
+	Content      []string // Content of the viewport split by lines
 	SelectedText string   // The most recently selected text
 
 	// Cursor for visual indication
@@ -104,16 +104,16 @@ func (s *Selection) End() string {
 	if !s.Active || len(s.Content) == 0 {
 		return ""
 	}
-	
+
 	// Make sure start is before end
 	startLine, endLine := s.StartLine, s.EndLine
 	startCol, endCol := s.StartCol, s.EndCol
-	
+
 	if startLine > endLine || (startLine == endLine && startCol > endCol) {
 		startLine, endLine = endLine, startLine
 		startCol, endCol = endCol, startCol
 	}
-	
+
 	// Adjust line indices to be within bounds
 	if startLine < 0 {
 		startLine = 0
@@ -131,42 +131,42 @@ func (s *Selection) End() string {
 	if endLine >= len(s.Content) {
 		endLine = len(s.Content) - 1
 	}
-	
+
 	// Extract the selected text
 	var result strings.Builder
-	
+
 	for i := startLine; i <= endLine; i++ {
 		line := s.Content[i]
-		
+
 		// Adjust column indices
 		start := 0
 		end := len(line)
-		
+
 		if i == startLine {
 			start = startCol
 			if start > len(line) {
 				start = len(line)
 			}
 		}
-		
+
 		if i == endLine {
 			end = endCol
 			if end > len(line) {
 				end = len(line)
 			}
 		}
-		
+
 		// Append the selected portion of this line
 		if start <= end && end <= len(line) {
 			result.WriteString(line[start:end])
 		}
-		
+
 		// Add newline if not the last line
 		if i < endLine {
 			result.WriteString("\n")
 		}
 	}
-	
+
 	s.SelectedText = result.String()
 	return s.SelectedText
 }
@@ -243,7 +243,7 @@ func (s *Selection) HighlightedContent() string {
 						result.WriteString(line[:cursorCol])
 					}
 					if cursorCol < len(line) {
-						result.WriteString(cursorStyle.Render(line[cursorCol:cursorCol+1]))
+						result.WriteString(cursorStyle.Render(line[cursorCol : cursorCol+1]))
 						if cursorCol+1 < len(line) {
 							result.WriteString(line[cursorCol+1:])
 						}
@@ -274,9 +274,9 @@ func (s *Selection) HighlightedContent() string {
 						if cursorCol > start {
 							result.WriteString(highlightStyle.Render(line[start:cursorCol]))
 						}
-						result.WriteString(cursorStyle.Render(line[cursorCol:cursorCol+1]))
+						result.WriteString(cursorStyle.Render(line[cursorCol : cursorCol+1]))
 						if cursorCol+1 < end {
-							result.WriteString(highlightStyle.Render(line[cursorCol+1:end]))
+							result.WriteString(highlightStyle.Render(line[cursorCol+1 : end]))
 						}
 					} else {
 						// Cursor outside selection
@@ -287,7 +287,7 @@ func (s *Selection) HighlightedContent() string {
 					if end < len(line) {
 						if cursorCol > end {
 							result.WriteString(line[end:cursorCol])
-							result.WriteString(cursorStyle.Render(line[cursorCol:cursorCol+1]))
+							result.WriteString(cursorStyle.Render(line[cursorCol : cursorCol+1]))
 							if cursorCol+1 < len(line) {
 								result.WriteString(line[cursorCol+1:])
 							}
@@ -312,7 +312,7 @@ func (s *Selection) HighlightedContent() string {
 							if cursorCol > start {
 								result.WriteString(highlightStyle.Render(line[start:cursorCol]))
 							}
-							result.WriteString(cursorStyle.Render(line[cursorCol:cursorCol+1]))
+							result.WriteString(cursorStyle.Render(line[cursorCol : cursorCol+1]))
 							if cursorCol+1 < len(line) {
 								result.WriteString(highlightStyle.Render(line[cursorCol+1:]))
 							}
@@ -330,9 +330,9 @@ func (s *Selection) HighlightedContent() string {
 							if cursorCol > 0 {
 								result.WriteString(highlightStyle.Render(line[:cursorCol]))
 							}
-							result.WriteString(cursorStyle.Render(line[cursorCol:cursorCol+1]))
+							result.WriteString(cursorStyle.Render(line[cursorCol : cursorCol+1]))
 							if cursorCol+1 < end {
-								result.WriteString(highlightStyle.Render(line[cursorCol+1:end]))
+								result.WriteString(highlightStyle.Render(line[cursorCol+1 : end]))
 							}
 						} else {
 							result.WriteString(highlightStyle.Render(line[:end]))
@@ -341,7 +341,7 @@ func (s *Selection) HighlightedContent() string {
 						if end < len(line) {
 							if cursorCol >= end {
 								result.WriteString(line[end:cursorCol])
-								result.WriteString(cursorStyle.Render(line[cursorCol:cursorCol+1]))
+								result.WriteString(cursorStyle.Render(line[cursorCol : cursorCol+1]))
 								if cursorCol+1 < len(line) {
 									result.WriteString(line[cursorCol+1:])
 								}
@@ -355,7 +355,7 @@ func (s *Selection) HighlightedContent() string {
 							if cursorCol > 0 {
 								result.WriteString(highlightStyle.Render(line[:cursorCol]))
 							}
-							result.WriteString(cursorStyle.Render(line[cursorCol:cursorCol+1]))
+							result.WriteString(cursorStyle.Render(line[cursorCol : cursorCol+1]))
 							if cursorCol+1 < len(line) {
 								result.WriteString(highlightStyle.Render(line[cursorCol+1:]))
 							}
@@ -440,7 +440,7 @@ func (s *Selection) HighlightedContent() string {
 					result.WriteString(line[:cursorCol])
 				}
 				if cursorCol < len(line) {
-					result.WriteString(cursorStyle.Render(line[cursorCol:cursorCol+1]))
+					result.WriteString(cursorStyle.Render(line[cursorCol : cursorCol+1]))
 					if cursorCol+1 < len(line) {
 						result.WriteString(line[cursorCol+1:])
 					}

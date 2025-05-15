@@ -16,14 +16,14 @@ type ToolUser interface {
 
 // ToolManager handles tool integration with chat service
 type ToolManager struct {
-	toolUser   ToolUser
+	toolUser     ToolUser
 	toolsEnabled bool
 }
 
 // NewToolManager creates a new tool manager
 func NewToolManager() *ToolManager {
 	return &ToolManager{
-		toolUser: tools.NewToolExecutor(),
+		toolUser:     tools.NewToolExecutor(),
 		toolsEnabled: true,
 	}
 }
