@@ -1,7 +1,7 @@
 .PHONY: build run run-claude test lint clean all default
 
 # Binary name
-BINARY_NAME=mcpterm
+BINARY_NAME=mcp
 
 # Project details
 PROJECT_NAME=mcpterm-go

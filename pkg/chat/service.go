@@ -6,38 +6,38 @@ import (
 	"sync"
 
 	"github.com/navicore/mcpterm-go/pkg/backend"
+	"github.com/navicore/mcpterm-go/pkg/tools"
+	"github.com/navicore/mcpterm-go/pkg/tools/core"
 )
 
-// Message represents a chat message
-type Message struct {
-	Sender  string // Who sent the message ("user", "assistant", "system")
-	Content string // Message content
-	IsUser  bool   // Whether the message is from the user
-}
+// ServiceMessage is used internally by ChatService - use Message from chat.go for the interface
+type ServiceMessage Message
 
 // ChatOptions contains options for the chat service
 type ChatOptions struct {
-	InitialSystemPrompt  string
-	BackendType          backend.BackendType
-	ModelID              string
-	ContextWindowSize    int
-	MaxTokens            int
-	Temperature          float64
-	BackendOptions       map[string]any
-	EnableTools          bool              // Whether to enable tool support
+	InitialSystemPrompt   string
+	BackendType           backend.BackendType
+	ModelID               string
+	ContextWindowSize     int
+	MaxTokens             int
+	Temperature           float64
+	BackendOptions        map[string]any
+	EnableTools           bool     // Whether to enable tool support
+	EnabledToolCategories []string // List of enabled tool categories
 }
 
 // DefaultChatOptions returns the default chat options
 func DefaultChatOptions() ChatOptions {
 	return ChatOptions{
-		InitialSystemPrompt: defaultSystemPrompt,
-		BackendType:        backend.BackendMock,
-		ModelID:            "mock",
-		ContextWindowSize:  20,
-		MaxTokens:          1000,
-		Temperature:        0.7,
-		BackendOptions:     make(map[string]any),
-		EnableTools:        true,  // Tools enabled by default
+		InitialSystemPrompt:   GetDefaultSystemPrompt(),
+		BackendType:           backend.BackendMock,
+		ModelID:               "mock",
+		ContextWindowSize:     20,
+		MaxTokens:             1000,
+		Temperature:           0.7,
+		BackendOptions:        make(map[string]any),
+		EnableTools:           true,                   // Tools enabled by default
+		EnabledToolCategories: []string{"filesystem"}, // Only filesystem tools by default
 	}
 }
 
@@ -48,7 +48,7 @@ type ChatService struct {
 	options        ChatOptions
 	systemPrompt   string
 	conversationMu sync.RWMutex
-	toolManager    *ToolManager
+	toolManager    *tools.ToolManager
 	toolsEnabled   bool
 }
 
@@ -62,17 +62,27 @@ func NewChatService(opts ChatOptions) (*ChatService, error) {
 		Temperature: opts.Temperature,
 		Options:     opts.BackendOptions,
 	}
-	
+
 	b, err := backend.NewBackend(backendConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create chat backend: %w", err)
 	}
-	
+
 	// Create tool manager
-	toolManager := NewToolManager()
+	toolManager, err := tools.Initialize()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize tool manager: %w", err)
+	}
 
 	// Set tool availability based on options
 	toolManager.EnableTools(opts.EnableTools)
+
+	// Enable specific categories if provided
+	if len(opts.EnabledToolCategories) > 0 {
+		if err := toolManager.EnableCategoriesByIDs(opts.EnabledToolCategories); err != nil {
+			return nil, fmt.Errorf("failed to enable tool categories: %w", err)
+		}
+	}
 
 	return &ChatService{
 		backend:      b,
@@ -138,7 +148,7 @@ func (s *ChatService) processChatWithTools() (Message, error) {
 		// If the model requested a tool
 		if resp.ToolUse != nil && resp.FinishReason == "tool_use" {
 			// Execute the tool first before adding any messages
-			result, err := s.toolManager.HandleToolUse(resp.ToolUse)
+			result, err := s.toolManager.HandleToolUse((*core.ToolUse)(resp.ToolUse))
 			if err != nil {
 				// Add error message to history
 				errorMsg := Message{
@@ -154,11 +164,11 @@ func (s *ChatService) processChatWithTools() (Message, error) {
 
 			// Add a single combined message about tool usage with more details
 			toolMsg := Message{
-				Sender:  "assistant",
+				Sender: "assistant",
 				Content: fmt.Sprintf("Using the '%s' tool to help answer your question. Tool request details: %s",
 					resp.ToolUse.Name,
 					string(resp.ToolUse.Input)),
-				IsUser:  false,
+				IsUser: false,
 			}
 			s.messages = append(s.messages, toolMsg)
 
@@ -206,27 +216,28 @@ func (s *ChatService) processChatWithTools() (Message, error) {
 func (s *ChatService) GetHistory() []Message {
 	s.conversationMu.RLock()
 	defer s.conversationMu.RUnlock()
-	
+
 	// Return a copy of the messages to prevent race conditions
 	history := make([]Message, len(s.messages))
 	copy(history, s.messages)
-	
+
 	return history
 }
 
 // Clear clears the chat history
-func (s *ChatService) Clear() {
+func (s *ChatService) Clear() error {
 	s.conversationMu.Lock()
 	defer s.conversationMu.Unlock()
-	
+
 	s.messages = []Message{}
+	return nil
 }
 
 // updateSystemPrompt updates the system prompt
 func (s *ChatService) UpdateSystemPrompt(prompt string) {
 	s.conversationMu.Lock()
 	defer s.conversationMu.Unlock()
-	
+
 	s.systemPrompt = prompt
 }
 
@@ -239,33 +250,33 @@ func (s *ChatService) prepareBackendMessages() []backend.Message {
 			Content: s.systemPrompt,
 		},
 	}
-	
+
 	// Calculate how many messages we can include
 	// For now, we'll use a simple approach of taking the last N messages
 	messageLimit := s.options.ContextWindowSize
 	if messageLimit <= 0 {
 		messageLimit = 20 // Default to 20 messages if not specified
 	}
-	
+
 	// Get the messages to include
 	messagesToInclude := s.messages
 	if len(messagesToInclude) > messageLimit {
 		messagesToInclude = messagesToInclude[len(messagesToInclude)-messageLimit:]
 	}
-	
+
 	// Add the messages
 	for _, msg := range messagesToInclude {
 		role := "user"
 		if !msg.IsUser {
 			role = "assistant"
 		}
-		
+
 		result = append(result, backend.Message{
 			Role:    role,
 			Content: msg.Content,
 		})
 	}
-	
+
 	return result
 }
 
@@ -301,8 +312,22 @@ func (s *ChatService) Close() error {
 	return nil
 }
 
-// Default system prompt
-const defaultSystemPrompt = `You are Claude, a helpful AI assistant. 
-Respond concisely and provide accurate, factual information. 
+// Default system prompt for backward compatibility
+// This will be kept in sync with DefaultSystemPrompt in prompt.go
+const defaultSystemPrompt = `You are Claude, a helpful AI assistant in a terminal environment.
+
+Respond concisely and provide accurate, factual information.
 Format your responses using Markdown when appropriate to improve readability.
-Use code blocks with proper syntax highlighting when including code.`
+Use code blocks with proper syntax highlighting when including code.
+
+You have access to the following capabilities:
+- Reading files from the filesystem
+- Creating and modifying files and directories
+- Running shell commands to help the user
+- Finding files and searching within them
+
+Always ensure you provide the most helpful and accurate responses possible.
+When asked to run commands or modify files, explain what you're doing clearly.
+
+Remember that you are running in a terminal interface with vi-like navigation,
+so format your responses appropriately for this context.`

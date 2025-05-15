@@ -18,9 +18,9 @@ type FindInput struct {
 	Type      string   `json:"type,omitempty"`
 	Maxdepth  int      `json:"maxdepth,omitempty"`
 	Pattern   string   `json:"pattern,omitempty"`
-	Size      string   `json:"size,omitempty"`      // Size (e.g., "+1k" for > 1KB)
-	Mtime     string   `json:"mtime,omitempty"`     // Modified time (e.g., "-1" for last day)
-	Path      string   `json:"path,omitempty"`      // Path pattern to match/exclude
+	Size      string   `json:"size,omitempty"`  // Size (e.g., "+1k" for > 1KB)
+	Mtime     string   `json:"mtime,omitempty"` // Modified time (e.g., "-1" for last day)
+	Path      string   `json:"path,omitempty"`  // Path pattern to match/exclude
 	Args      []string `json:"args,omitempty"`
 }
 
@@ -46,7 +46,7 @@ type FileEntry struct {
 }
 
 // ToolExecutor handles execution of tools
-type ToolExecutor struct {}
+type ToolExecutor struct{}
 
 // NewToolExecutor creates a new ToolExecutor
 func NewToolExecutor() *ToolExecutor {
@@ -244,12 +244,12 @@ func (t *ToolExecutor) executeFind(input json.RawMessage) (interface{}, error) {
 		// Create a pipe command with grep
 		grepCmd := exec.Command("grep", "-l", params.Pattern)
 		grepCmd.Stdin = strings.NewReader(results)
-		
+
 		grepOut, err := grepCmd.Output()
 		if err != nil && err.(*exec.ExitError).ExitCode() != 1 { // grep returns 1 when no matches
 			return nil, fmt.Errorf("grep command failed: %w", err)
 		}
-		
+
 		results = strings.TrimSpace(string(grepOut))
 		if results == "" {
 			return []string{}, nil

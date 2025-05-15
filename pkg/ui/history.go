@@ -22,12 +22,12 @@ func (h *InputHistory) Add(text string) {
 	if text == "" {
 		return
 	}
-	
+
 	// Avoid duplicate consecutive entries
 	if len(h.items) > 0 && h.items[len(h.items)-1] == text {
 		return
 	}
-	
+
 	h.items = append(h.items, text)
 	h.currentPos = len(h.items)
 	h.saved = true
@@ -40,17 +40,17 @@ func (h *InputHistory) Previous(currentText string) string {
 		h.currentText = currentText
 		h.saved = true
 	}
-	
+
 	// Handle empty history
 	if len(h.items) == 0 {
 		return currentText
 	}
-	
+
 	// Already at the beginning
 	if h.currentPos <= 0 {
 		return h.items[0]
 	}
-	
+
 	h.currentPos--
 	return h.items[h.currentPos]
 }
@@ -61,19 +61,19 @@ func (h *InputHistory) Next() string {
 	if len(h.items) == 0 {
 		return ""
 	}
-	
+
 	// At or beyond the end of history
 	if h.currentPos >= len(h.items) {
 		return h.currentText
 	}
-	
+
 	h.currentPos++
-	
+
 	// If at the end of history, return saved text
 	if h.currentPos == len(h.items) {
 		return h.currentText
 	}
-	
+
 	return h.items[h.currentPos]
 }
 

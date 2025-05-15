@@ -18,35 +18,50 @@ type Message struct {
 	IsUser   bool
 }
 
+// llmResponseMsg represents a response from the LLM
+type llmResponseMsg struct {
+	response chat.Message
+	err      error
+}
+
 // Model represents the TUI state
 type Model struct {
-	viewport      viewport.Model
-	editor        *ViEditor
-	messages      []Message
-	chatService   *chat.ChatService
-	err           error
-	showHelp      bool
-	windowWidth   int
+	viewport    viewport.Model
+	editor      *ViEditor
+	messages    []Message
+	chatService chat.ChatServiceInterface
+	err         error
+	showHelp    bool
+	windowWidth int
 
 	// Focus state
 	viewportFocused bool
 
 	// Selection state
 	viewportSelection *Selection
-	viewportLines     []string        // Viewport content split by lines
-	viewportPosition  int             // Current line position in viewport
-	viewportVisual    bool            // Whether visual mode is active in viewport
+	viewportLines     []string // Viewport content split by lines
+	viewportPosition  int      // Current line position in viewport
+	viewportVisual    bool     // Whether visual mode is active in viewport
+
+	// Processing state
+	isProcessing bool // Whether the LLM is currently processing a response
 }
 
 // Style definitions
 var (
 	userMessageStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#7D56F4")).
-			PaddingLeft(2)
+				Foreground(lipgloss.Color("#7D56F4")).
+				PaddingLeft(2)
 
 	botMessageStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#43BF6D")).
 			PaddingLeft(2)
+
+	processingStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFA500")). // Orange for processing indicator
+			PaddingLeft(2).
+			Italic(true).
+			Bold(true)
 
 	helpStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#626262")).
@@ -54,23 +69,23 @@ var (
 
 	errorStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FF5F87"))
-			
+
 	// Status indicators
 	normalModeIndicator = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color("#7D56F4")).
-			Padding(0, 1).
-			MarginRight(1).
-			Bold(true).
-			Render("NORMAL")
-			
+				Foreground(lipgloss.Color("#FFFFFF")).
+				Background(lipgloss.Color("#7D56F4")).
+				Padding(0, 1).
+				MarginRight(1).
+				Bold(true).
+				Render("NORMAL")
+
 	insertModeIndicator = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color("#43BF6D")).
-			Padding(0, 1).
-			MarginRight(1).
-			Bold(true).
-			Render("INSERT")
+				Foreground(lipgloss.Color("#FFFFFF")).
+				Background(lipgloss.Color("#43BF6D")).
+				Padding(0, 1).
+				MarginRight(1).
+				Bold(true).
+				Render("INSERT")
 )
 
 // NewModel creates a new TUI model
@@ -96,7 +111,7 @@ func NewModel() Model {
 }
 
 // SetChatService sets the chat service for the model
-func (m *Model) SetChatService(service *chat.ChatService) {
+func (m *Model) SetChatService(service chat.ChatServiceInterface) {
 	m.chatService = service
 }
 
@@ -147,6 +162,12 @@ func (m *Model) updateViewportContent() {
 		sb.WriteString("\n")
 	}
 
+	// Add processing indicator if LLM is generating a response
+	if m.isProcessing {
+		sb.WriteString(botMessageStyle.Render("Assistant:") + "\n")
+		sb.WriteString(processingStyle.Render("⏳ Processing...") + "\n\n")
+	}
+
 	content := sb.String()
 
 	// Update selection content
@@ -155,12 +176,31 @@ func (m *Model) updateViewportContent() {
 
 	// Set viewport content - always use highlighted content for cursor visibility
 	if m.viewportFocused {
+		// Always ensure cursor is visible when viewport is focused
+		m.viewportSelection.CursorVisible = true
+
+		// If cursor position isn't valid, set it to current viewport position
+		if m.viewportSelection.CursorLine >= len(m.viewportLines) || m.viewportSelection.CursorLine < 0 {
+			m.viewportSelection.ShowCursor(m.viewportPosition, 0)
+		}
+
 		m.viewport.SetContent(m.viewportSelection.HighlightedContent())
+
+		// Ensure the cursor is visible in the viewport view
+		// If cursor is above viewport view
+		if m.viewportSelection.CursorLine < m.viewport.YOffset {
+			m.viewport.SetYOffset(m.viewportSelection.CursorLine)
+		}
+		// If cursor is below viewport view
+		if m.viewportSelection.CursorLine >= m.viewport.YOffset+m.viewport.Height {
+			m.viewport.SetYOffset(m.viewportSelection.CursorLine - m.viewport.Height + 1)
+		}
 	} else {
 		m.viewport.SetContent(content)
-	}
 
-	m.viewport.GotoBottom()
+		// Default to bottom for new messages when not focused
+		m.viewport.GotoBottom()
+	}
 }
 
 // renderHelp renders keyboard shortcuts help
@@ -175,21 +215,25 @@ func (m Model) renderHelp() string {
 		// Viewport mode help
 		if m.viewportVisual {
 			// Visual mode help for viewport
-			return helpStyle.Render("VISUAL: hjkl: extend selection | 0/$: line start/end | y: yank | Esc: exit visual | " + commonHelp)
+			return helpStyle.Render("VIEWPORT VISUAL: hjkl: extend selection | 0/$: line start/end | y: yank | Esc: exit visual | " + commonHelp)
 		} else {
 			// Normal viewport help
-			viewportHelp := "hjkl: move cursor | j/k: scroll | 0/$: line start/end | g/G: top/bottom | v: visual mode"
+			viewportHelp := "VIEWPORT: j/k: scroll | g/G: top/bottom | d/u: page down/up | 0/$: line start/end | v: visual"
 			return helpStyle.Render(viewportHelp + " | " + commonHelp)
 		}
 	} else {
 		// Input mode help
 		if m.editor.mode == VisualMode {
 			// Visual mode help for input
-			return helpStyle.Render("VISUAL: h/l: extend selection | y: yank | d: delete | Esc: exit visual | " + commonHelp)
+			return helpStyle.Render("INPUT VISUAL: h/l: extend selection | y: yank | d: delete | Esc: exit visual | " + commonHelp)
+		} else if m.editor.mode == NormalMode {
+			// Normal mode help
+			viHelp := "INPUT NORMAL: 0/$: line start/end | hjkl: navigate | w/b: word | i/a: insert | v: visual | j/k: history"
+			return helpStyle.Render(viHelp + " | " + commonHelp)
 		} else {
-			// Normal/insert mode help
-			viHelp := "Normal: 0/$: line start/end | hjkl: navigate | w/b: word movement | i/a: insert | v: visual"
-			return helpStyle.Render("Esc: normal mode | ↑/↓: history | " + commonHelp + "\n" + helpStyle.Render(viHelp))
+			// Insert mode help
+			viHelp := "INPUT INSERT: Esc: normal mode | ↑/↓: history | Tab to switch to message history"
+			return helpStyle.Render(viHelp + " | " + commonHelp)
 		}
 	}
 }
@@ -203,38 +247,69 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var (
 		editorCmd tea.Cmd
-		vpCmd tea.Cmd
-		cmds []tea.Cmd
+		vpCmd     tea.Cmd
+		cmds      []tea.Cmd
 	)
 
 	switch msg := msg.(type) {
+	case llmResponseMsg:
+		// Handle LLM response
+		m.isProcessing = false
+
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+
+		// Add bot response
+		m.AddMessage(Message{
+			Username: "Assistant",
+			Content:  msg.response.Content,
+			IsUser:   false,
+		})
+
+		return m, nil
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
 			return m, tea.Quit
-		
+
 		case "ctrl+h":
 			m.showHelp = !m.showHelp
 			return m, nil
-		
+
 		case "tab":
 			// Toggle focus between viewport and editor
 			m.viewportFocused = !m.viewportFocused
 			if m.viewportFocused {
 				m.editor.Blur()
 
-				// Show cursor in viewport at current position
-				currentLine := m.viewport.YOffset
-				m.viewportSelection.ShowCursor(currentLine, 0)
+				// Show cursor in viewport at a position we can see
+				visibleLine := m.viewport.YOffset
+				if visibleLine >= len(m.viewportLines) {
+					visibleLine = len(m.viewportLines) - 1
+					if visibleLine < 0 {
+						visibleLine = 0
+					}
+				}
+
+				// Store the current position for j/k navigation
+				m.viewportPosition = visibleLine
+				m.viewportSelection.ShowCursor(visibleLine, 0)
+				// Make sure the cursor is visible and the selection is not active
+				m.viewportVisual = false
+				m.viewportSelection.Active = false
+				m.viewportSelection.CursorVisible = true
 				m.updateViewportContent()
 			} else {
-				// Hide viewport cursor when switching to editor
-				m.viewportSelection.HideCursor()
+				// Always keep viewport cursor visible even when switching to editor
+				m.viewportSelection.CursorVisible = true
 				m.updateViewportContent()
 				editorCmd = m.editor.Focus()
 			}
 			return m, editorCmd
-			
+
 		case "enter":
 			// Only process Enter if editor is focused and in insert mode
 			if !m.viewportFocused {
@@ -242,8 +317,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if userMsg != "" {
 					// Add to input history
 					m.editor.AddToHistory(userMsg)
-					
-					// Add user message
+
+					// Add user message immediately
 					m.AddMessage(Message{
 						Content: userMsg,
 						IsUser:  true,
@@ -252,24 +327,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Clear editor
 					m.editor.Reset()
 
-					// Send message to chat service
-					response, err := m.chatService.SendMessage(userMsg)
-					if err != nil {
-						m.err = err
-						return m, nil
-					}
+					// Set processing indicator
+					m.isProcessing = true
+					m.updateViewportContent()
 
-					// Add bot response
-					m.AddMessage(Message{
-						Username: "Assistant",
-						Content:  response.Content,
-						IsUser:   false,
-					})
+					// Process message in the background
+					return m, func() tea.Msg {
+						response, err := m.chatService.SendMessage(userMsg)
+						return llmResponseMsg{
+							response: response,
+							err:      err,
+						}
+					}
 				}
 				return m, nil
 			}
 		}
-		
+
 		// Handle keyboard shortcuts when viewport is focused
 		if m.viewportFocused {
 			// First, handle commands for both normal and visual modes
@@ -281,7 +355,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewportSelection.Active = false
 					cursorLine := m.viewportSelection.CursorLine
 					cursorCol := m.viewportSelection.CursorCol
-					m.viewportSelection.HideCursor()
+					// Make sure cursor remains visible
+					m.viewportSelection.CursorVisible = true
 					m.viewportSelection.ShowCursor(cursorLine, cursorCol)
 					m.updateViewportContent()
 					return m, nil
@@ -319,18 +394,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				case "h":
 					// Extend selection left
-					m.viewportSelection.MoveCursor(0, -1)
-					m.viewportSelection.Update(m.viewportSelection.CursorLine, m.viewportSelection.CursorCol)
-					_ = m.viewportSelection.End()
-					m.updateViewportContent()
+					if m.viewportSelection.CursorCol > 0 {
+						m.viewportSelection.MoveCursor(0, -1)
+						m.viewportSelection.Update(m.viewportSelection.CursorLine, m.viewportSelection.CursorCol)
+						_ = m.viewportSelection.End()
+						m.updateViewportContent()
+					}
 					return m, nil
 
 				case "l":
 					// Extend selection right
-					m.viewportSelection.MoveCursor(0, 1)
-					m.viewportSelection.Update(m.viewportSelection.CursorLine, m.viewportSelection.CursorCol)
-					_ = m.viewportSelection.End()
-					m.updateViewportContent()
+					if m.viewportSelection.CursorLine < len(m.viewportLines) {
+						line := m.viewportLines[m.viewportSelection.CursorLine]
+						if m.viewportSelection.CursorCol < len(line) {
+							m.viewportSelection.MoveCursor(0, 1)
+							m.viewportSelection.Update(m.viewportSelection.CursorLine, m.viewportSelection.CursorCol)
+							_ = m.viewportSelection.End()
+							m.updateViewportContent()
+						}
+					}
 					return m, nil
 
 				case "0":
@@ -352,6 +434,101 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					return m, nil
 
+				case "w":
+					// Move to start of next word
+					if m.viewportSelection.CursorLine < len(m.viewportLines) {
+						line := m.viewportLines[m.viewportSelection.CursorLine]
+						curCol := m.viewportSelection.CursorCol
+
+						// Handle cursor at the end of line - move to next line
+						if curCol >= len(line) {
+							if m.viewportSelection.CursorLine+1 < len(m.viewportLines) {
+								// Move to start of next line
+								m.viewportSelection.MoveCursor(1, 0)
+								m.viewportSelection.CursorCol = 0
+								m.viewportSelection.Update(m.viewportSelection.CursorLine, 0)
+								_ = m.viewportSelection.End()
+							}
+						} else {
+							// Find next word boundary
+							isSpace := func(r byte) bool { return r == ' ' || r == '\t' || r == '\n' }
+							foundSpace := false
+							i := curCol
+
+							// Skip current word if in the middle of one
+							for i < len(line) && !isSpace(line[i]) {
+								i++
+							}
+
+							// Skip spaces to the next word
+							for i < len(line) && isSpace(line[i]) {
+								i++
+								foundSpace = true
+							}
+
+							// If we found a next word, move to it
+							if i < len(line) {
+								m.viewportSelection.MoveCursor(0, i-curCol)
+								m.viewportSelection.Update(m.viewportSelection.CursorLine, i)
+								_ = m.viewportSelection.End()
+							} else if foundSpace {
+								// If we only found spaces at the end, go to end of line
+								m.viewportSelection.MoveCursor(0, len(line)-curCol)
+								m.viewportSelection.Update(m.viewportSelection.CursorLine, len(line))
+								_ = m.viewportSelection.End()
+							} else if m.viewportSelection.CursorLine+1 < len(m.viewportLines) {
+								// If at end of line and no spaces found, go to next line
+								m.viewportSelection.MoveCursor(1, 0)
+								m.viewportSelection.CursorCol = 0
+								m.viewportSelection.Update(m.viewportSelection.CursorLine, 0)
+								_ = m.viewportSelection.End()
+							}
+						}
+
+						m.updateViewportContent()
+					}
+					return m, nil
+
+				case "b":
+					// Move to start of previous word
+					curLine := m.viewportSelection.CursorLine
+					curCol := m.viewportSelection.CursorCol
+
+					if curCol == 0 && curLine > 0 {
+						// At start of line, move to previous line's end
+						prevLine := m.viewportLines[curLine-1]
+						m.viewportSelection.MoveCursor(-1, len(prevLine))
+						m.viewportSelection.Update(curLine-1, len(prevLine))
+						_ = m.viewportSelection.End()
+						m.updateViewportContent()
+					} else if curLine < len(m.viewportLines) {
+						// Move within current line
+						line := m.viewportLines[curLine]
+						isSpace := func(r byte) bool { return r == ' ' || r == '\t' || r == '\n' }
+						i := curCol
+
+						// Move back one character to start if we're at a word boundary
+						if i > 0 && i < len(line) && !isSpace(line[i]) && isSpace(line[i-1]) {
+							i--
+						}
+
+						// Skip any spaces backward
+						for i > 0 && isSpace(line[i-1]) {
+							i--
+						}
+
+						// Skip the current word backward
+						for i > 0 && !isSpace(line[i-1]) {
+							i--
+						}
+
+						m.viewportSelection.MoveCursor(0, i-curCol)
+						m.viewportSelection.Update(curLine, i)
+						_ = m.viewportSelection.End()
+						m.updateViewportContent()
+					}
+					return m, nil
+
 				case "y":
 					// Yank (copy) selection
 					text := m.viewportSelection.GetSelectedText()
@@ -362,7 +539,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						// Keep cursor position
 						cursorLine := m.viewportSelection.CursorLine
 						cursorCol := m.viewportSelection.CursorCol
-						m.viewportSelection.HideCursor()
+						// Make sure cursor remains visible after yanking
+						m.viewportSelection.CursorVisible = true
 						m.viewportSelection.ShowCursor(cursorLine, cursorCol)
 						m.updateViewportContent()
 					}
@@ -372,66 +550,141 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Normal mode commands with cursor movement
 				switch msg.String() {
 				case "j":
+					// Move down one line and synchronize cursor position
 					m.viewport.ScrollDown(1)
+
+					// Update our position tracker to follow viewport
 					m.viewportPosition = m.viewport.YOffset
-					m.viewportSelection.MoveCursor(1, 0)
+
+					// Make sure cursor is at the current line
+					if m.viewportPosition < len(m.viewportLines) {
+						m.viewportSelection.ShowCursor(m.viewportPosition, 0)
+					}
+
+					// Update display
 					m.updateViewportContent()
 					return m, nil
 
 				case "k":
+					// Move up one line and synchronize cursor position
 					m.viewport.ScrollUp(1)
+
+					// Update our position tracker to follow viewport
 					m.viewportPosition = m.viewport.YOffset
-					m.viewportSelection.MoveCursor(-1, 0)
+
+					// Make sure cursor is at the current line
+					if m.viewportPosition < len(m.viewportLines) {
+						m.viewportSelection.ShowCursor(m.viewportPosition, 0)
+					}
+
+					// Update display
 					m.updateViewportContent()
 					return m, nil
 
 				case "h":
 					// Move cursor left
-					m.viewportSelection.MoveCursor(0, -1)
+					// Keep the same line but adjust column
+					oldCol := m.viewportSelection.CursorCol
+					if oldCol > 0 {
+						m.viewportSelection.ShowCursor(m.viewportPosition, oldCol-1)
+					}
 					m.updateViewportContent()
 					return m, nil
 
 				case "l":
 					// Move cursor right
-					m.viewportSelection.MoveCursor(0, 1)
+					// Keep the same line but adjust column
+					oldCol := m.viewportSelection.CursorCol
+					if m.viewportPosition < len(m.viewportLines) {
+						line := m.viewportLines[m.viewportPosition]
+						if oldCol < len(line) {
+							m.viewportSelection.ShowCursor(m.viewportPosition, oldCol+1)
+						}
+					}
 					m.updateViewportContent()
 					return m, nil
 
 				case "g":
+					// Go to the top of the viewport and set cursor there
 					m.viewport.GotoTop()
 					m.viewportPosition = 0
+
+					// Make cursor visible at the top and ensure it's set to line 0
 					m.viewportSelection.ShowCursor(0, 0)
+
+					// Force YOffset to 0 to ensure we're truly at the top
+					m.viewport.SetYOffset(0)
+
 					m.updateViewportContent()
 					return m, nil
 
 				case "G":
+					// Go to the bottom of the viewport
 					m.viewport.GotoBottom()
+
 					// Set position to last line
 					lastLine := 0
 					if len(m.viewportLines) > 0 {
 						lastLine = len(m.viewportLines) - 1
 						m.viewportPosition = lastLine
+
+						// Calculate offset to ensure the cursor is visible
+						// This sets YOffset so the last line appears at the bottom of the viewport
+						if m.viewport.Height < len(m.viewportLines) {
+							m.viewport.SetYOffset(lastLine - m.viewport.Height + 1)
+							if m.viewport.YOffset < 0 {
+								m.viewport.SetYOffset(0)
+							}
+						}
 					}
+
+					// Show cursor on the last line
 					m.viewportSelection.ShowCursor(lastLine, 0)
+
 					m.updateViewportContent()
 					return m, nil
 
 				case "d":
+					// Half page down
 					m.viewport.HalfPageDown()
+
+					// Update tracking position to match viewport
 					m.viewportPosition = m.viewport.YOffset
-					m.viewportSelection.ShowCursor(m.viewport.YOffset, m.viewportSelection.CursorCol)
+
+					// Show cursor at the new position with same column
+					curCol := m.viewportSelection.CursorCol
+					m.viewportSelection.ShowCursor(m.viewport.YOffset, curCol)
+
+					// Make sure y-offset is actually updated
+					m.viewport.SetYOffset(m.viewportPosition)
+
 					m.updateViewportContent()
 					return m, nil
 
 				case "u":
+					// Half page up
 					m.viewport.HalfPageUp()
+
+					// Update tracking position to match viewport
 					m.viewportPosition = m.viewport.YOffset
-					m.viewportSelection.ShowCursor(m.viewport.YOffset, m.viewportSelection.CursorCol)
+
+					// Show cursor at the new position with same column
+					curCol := m.viewportSelection.CursorCol
+					m.viewportSelection.ShowCursor(m.viewport.YOffset, curCol)
+
+					// Make sure y-offset is actually updated
+					m.viewport.SetYOffset(m.viewportPosition)
+
 					m.updateViewportContent()
 					return m, nil
 
 				case "v":
 					// Enter visual mode at cursor position
+					// Make sure cursor is visible and position is valid
+					if !m.viewportSelection.CursorVisible {
+						m.viewportSelection.CursorVisible = true
+						m.viewportSelection.ShowCursor(m.viewportPosition, 0)
+					}
 					m.viewportVisual = true
 					cursorLine := m.viewportSelection.CursorLine
 					cursorCol := m.viewportSelection.CursorCol
@@ -453,10 +706,115 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.updateViewportContent()
 					}
 					return m, nil
+
+				case "w":
+					// Move to start of next word in normal mode
+					if m.viewportSelection.CursorLine < len(m.viewportLines) {
+						line := m.viewportLines[m.viewportSelection.CursorLine]
+						curCol := m.viewportSelection.CursorCol
+
+						// Handle cursor at the end of line
+						if curCol >= len(line) {
+							if m.viewportSelection.CursorLine+1 < len(m.viewportLines) {
+								// Move to start of next line
+								m.viewportPosition = m.viewportSelection.CursorLine + 1
+								m.viewportSelection.ShowCursor(m.viewportPosition, 0)
+
+								// Make sure the cursor is visible
+								if m.viewportPosition < m.viewport.YOffset ||
+									m.viewportPosition >= m.viewport.YOffset+m.viewport.Height {
+									m.viewport.SetYOffset(m.viewportPosition)
+								}
+
+								m.updateViewportContent()
+							}
+						} else {
+							// Find next word boundary
+							isSpace := func(r byte) bool { return r == ' ' || r == '\t' || r == '\n' }
+							foundSpace := false
+							i := curCol
+
+							// Skip current word if in the middle of one
+							for i < len(line) && !isSpace(line[i]) {
+								i++
+							}
+
+							// Skip spaces to the next word
+							for i < len(line) && isSpace(line[i]) {
+								i++
+								foundSpace = true
+							}
+
+							if i < len(line) {
+								// Found next word
+								m.viewportSelection.ShowCursor(m.viewportSelection.CursorLine, i)
+							} else if foundSpace {
+								// Found only spaces at the end
+								m.viewportSelection.ShowCursor(m.viewportSelection.CursorLine, len(line))
+							} else if m.viewportSelection.CursorLine+1 < len(m.viewportLines) {
+								// At end of line, go to next line
+								m.viewportPosition = m.viewportSelection.CursorLine + 1
+								m.viewportSelection.ShowCursor(m.viewportPosition, 0)
+
+								// Make sure the new line is visible
+								if m.viewportPosition < m.viewport.YOffset ||
+									m.viewportPosition >= m.viewport.YOffset+m.viewport.Height {
+									m.viewport.SetYOffset(m.viewportPosition)
+								}
+							}
+
+							m.updateViewportContent()
+						}
+					}
+					return m, nil
+
+				case "b":
+					// Move to start of previous word in normal mode
+					curLine := m.viewportSelection.CursorLine
+					curCol := m.viewportSelection.CursorCol
+
+					if curCol == 0 && curLine > 0 {
+						// At start of line, move to previous line
+						m.viewportPosition = curLine - 1
+						prevLine := m.viewportLines[m.viewportPosition]
+						m.viewportSelection.ShowCursor(m.viewportPosition, len(prevLine))
+
+						// Make sure the cursor is visible
+						if m.viewportPosition < m.viewport.YOffset ||
+							m.viewportPosition >= m.viewport.YOffset+m.viewport.Height {
+							m.viewport.SetYOffset(m.viewportPosition)
+						}
+
+						m.updateViewportContent()
+					} else if curLine < len(m.viewportLines) {
+						// Move within current line
+						line := m.viewportLines[curLine]
+						isSpace := func(r byte) bool { return r == ' ' || r == '\t' || r == '\n' }
+						i := curCol
+
+						// Move back one character if at a word boundary
+						if i > 0 && i < len(line) && !isSpace(line[i]) && isSpace(line[i-1]) {
+							i--
+						}
+
+						// Skip spaces backward
+						for i > 0 && isSpace(line[i-1]) {
+							i--
+						}
+
+						// Skip the word backward
+						for i > 0 && !isSpace(line[i-1]) {
+							i--
+						}
+
+						m.viewportSelection.ShowCursor(curLine, i)
+						m.updateViewportContent()
+					}
+					return m, nil
 				}
 			}
 		}
-	
+
 	case tea.WindowSizeMsg:
 		m.windowWidth = msg.Width
 
@@ -481,10 +839,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Handle editor events if not in viewport mode
 	if !m.viewportFocused {
-		// Check for j/k in editor normal mode which should only affect editor, not viewport
+		// Don't pass navigation key events to viewport when input is focused
 		skipViewportUpdate := false
 		if msg, ok := msg.(tea.KeyMsg); ok {
-			if m.editor.mode == ViMode(0) && (msg.String() == "j" || msg.String() == "k") {
+			// Skip viewport update for navigation keys regardless of editor mode when input is focused
+			switch msg.String() {
+			case "j", "k", "g", "G", "d", "u":
+				// These keys would otherwise cause unwanted scrolling
 				skipViewportUpdate = true
 			}
 		}
@@ -492,7 +853,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.editor, editorCmd = m.editor.Update(msg)
 		cmds = append(cmds, editorCmd)
 
-		// Skip viewport update for j/k in normal mode to avoid scrolling viewport
+		// Skip viewport update for navigation keys to avoid scrolling viewport while typing
 		if skipViewportUpdate {
 			return m, tea.Batch(cmds...)
 		}
@@ -546,7 +907,7 @@ func (m Model) View() string {
 		lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#AAAAAA")).
 			Render("MCPTerm Chat"))
-			
+
 	// Highlight the viewport when focused
 	var viewportView string
 	if m.viewportFocused {
@@ -557,7 +918,7 @@ func (m Model) View() string {
 	} else {
 		viewportView = m.viewport.View()
 	}
-	
+
 	// Combine the viewport, status line, input field, and help text
 	helpText := m.renderHelp()
 

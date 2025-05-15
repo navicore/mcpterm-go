@@ -20,22 +20,22 @@ const (
 type ViEditor struct {
 	textinput textinput.Model
 	mode      ViMode
-	
+
 	// Clipboard for yank/paste operations
 	clipboard string
-	
+
 	// Visual mode selection
 	visualStart int
 	visualEnd   int
-	
+
 	// Command buffer for multi-key commands
 	commandBuffer []rune
-	
+
 	// History navigation
 	history     []string
 	historyPos  int
 	tempContent string
-	
+
 	// Style
 	normalModeStyle lipgloss.Style
 	insertModeStyle lipgloss.Style
@@ -47,23 +47,23 @@ func NewViEditor() *ViEditor {
 	ti := textinput.New()
 	ti.Placeholder = "Type a message (Esc for normal mode)..."
 	ti.Focus()
-	
+
 	return &ViEditor{
-		textinput: ti,
-		mode:      InsertMode,
-		history:   make([]string, 0),
+		textinput:  ti,
+		mode:       InsertMode,
+		history:    make([]string, 0),
 		historyPos: -1,
-		
+
 		normalModeStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFFFF")).
 			Background(lipgloss.Color("#7D56F4")).
 			Padding(0, 1),
-			
+
 		insertModeStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFFFF")).
 			Background(lipgloss.Color("#43BF6D")).
 			Padding(0, 1),
-			
+
 		visualModeStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFFFF")).
 			Background(lipgloss.Color("#F7768E")).
@@ -127,12 +127,12 @@ func (e *ViEditor) AddToHistory(s string) {
 	if s == "" {
 		return
 	}
-	
+
 	// Don't add duplicate entries consecutively
 	if len(e.history) > 0 && e.history[len(e.history)-1] == s {
 		return
 	}
-	
+
 	e.history = append(e.history, s)
 	e.historyPos = len(e.history)
 }
@@ -142,12 +142,12 @@ func (e *ViEditor) PreviousHistory() {
 	if len(e.history) == 0 {
 		return
 	}
-	
+
 	// Save current input when starting history navigation
 	if e.historyPos == len(e.history) {
 		e.tempContent = e.textinput.Value()
 	}
-	
+
 	if e.historyPos > 0 {
 		e.historyPos--
 		e.textinput.SetValue(e.history[e.historyPos])
@@ -159,10 +159,10 @@ func (e *ViEditor) NextHistory() {
 	if len(e.history) == 0 {
 		return
 	}
-	
+
 	if e.historyPos < len(e.history) {
 		e.historyPos++
-		
+
 		if e.historyPos == len(e.history) {
 			e.textinput.SetValue(e.tempContent)
 		} else {
@@ -208,7 +208,7 @@ func (e *ViEditor) SetVisualMode() {
 // Update handles editor updates
 func (e *ViEditor) Update(msg tea.Msg) (*ViEditor, tea.Cmd) {
 	var cmd tea.Cmd
-	
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		// Handle mode-specific keys
@@ -219,7 +219,7 @@ func (e *ViEditor) Update(msg tea.Msg) (*ViEditor, tea.Cmd) {
 				// Switch to insert mode
 				e.SetInsertMode()
 				return e, nil
-				
+
 			case "a":
 				// Append after cursor
 				pos := e.textinput.Position()
@@ -228,23 +228,23 @@ func (e *ViEditor) Update(msg tea.Msg) (*ViEditor, tea.Cmd) {
 				}
 				e.SetInsertMode()
 				return e, nil
-				
+
 			case "A":
 				// Append at end of line
 				e.textinput.CursorEnd()
 				e.SetInsertMode()
 				return e, nil
-				
+
 			case "0":
 				// Go to beginning of line
 				e.textinput.CursorStart()
 				return e, nil
-				
+
 			case "$":
 				// Go to end of line
 				e.textinput.CursorEnd()
 				return e, nil
-				
+
 			case "h":
 				// Move left
 				pos := e.textinput.Position()
@@ -260,7 +260,7 @@ func (e *ViEditor) Update(msg tea.Msg) (*ViEditor, tea.Cmd) {
 					e.textinput.SetCursor(pos + 1)
 				}
 				return e, nil
-				
+
 			case "w":
 				// Move to next word
 				curPos := e.textinput.Position()
@@ -284,7 +284,7 @@ func (e *ViEditor) Update(msg tea.Msg) (*ViEditor, tea.Cmd) {
 					e.textinput.SetCursor(i)
 				}
 				return e, nil
-				
+
 			case "b":
 				// Move to previous word
 				curPos := e.textinput.Position()
@@ -292,26 +292,26 @@ func (e *ViEditor) Update(msg tea.Msg) (*ViEditor, tea.Cmd) {
 				if curPos <= 0 {
 					return e, nil
 				}
-				
+
 				// Skip spaces backwards
 				i := curPos - 1
 				for i > 0 && text[i] == ' ' {
 					i--
 				}
-				
+
 				// Skip current word backwards
 				for i > 0 && text[i] != ' ' {
 					i--
 				}
-				
+
 				// If we hit a space, move forward one
 				if i > 0 && text[i] == ' ' {
 					i++
 				}
-				
+
 				e.textinput.SetCursor(i)
 				return e, nil
-				
+
 			case "x":
 				// Delete character under cursor
 				curPos := e.textinput.Position()
@@ -321,7 +321,7 @@ func (e *ViEditor) Update(msg tea.Msg) (*ViEditor, tea.Cmd) {
 					e.textinput.SetValue(newText)
 				}
 				return e, nil
-				
+
 			case "D":
 				// Delete to end of line
 				curPos := e.textinput.Position()
@@ -331,7 +331,7 @@ func (e *ViEditor) Update(msg tea.Msg) (*ViEditor, tea.Cmd) {
 					e.textinput.SetValue(text[:curPos])
 				}
 				return e, nil
-				
+
 			case "d":
 				// Command buffer for delete operations
 				e.commandBuffer = append(e.commandBuffer, 'd')
@@ -344,7 +344,7 @@ func (e *ViEditor) Update(msg tea.Msg) (*ViEditor, tea.Cmd) {
 					}
 				}
 				return e, nil
-				
+
 			case "y":
 				// Command buffer for yank operations
 				e.commandBuffer = append(e.commandBuffer, 'y')
@@ -356,7 +356,7 @@ func (e *ViEditor) Update(msg tea.Msg) (*ViEditor, tea.Cmd) {
 					}
 				}
 				return e, nil
-				
+
 			case "p":
 				// Paste after cursor
 				curPos := e.textinput.Position()
@@ -371,7 +371,7 @@ func (e *ViEditor) Update(msg tea.Msg) (*ViEditor, tea.Cmd) {
 					}
 				}
 				return e, nil
-				
+
 			case "P":
 				// Paste before cursor
 				curPos := e.textinput.Position()
@@ -382,28 +382,28 @@ func (e *ViEditor) Update(msg tea.Msg) (*ViEditor, tea.Cmd) {
 					e.textinput.SetCursor(curPos + len(e.clipboard) - 1)
 				}
 				return e, nil
-				
+
 			case "v":
 				// Enter visual mode
 				e.SetVisualMode()
 				return e, nil
-				
+
 			case "j":
 				// Next in history in normal mode
 				e.NextHistory()
 				return e, nil
-				
+
 			case "k":
 				// Previous in history in normal mode
 				e.PreviousHistory()
 				return e, nil
-				
+
 			case "Y":
 				// Yank whole line to system clipboard
 				text := e.textinput.Value()
 				clipboard.WriteAll(text)
 				return e, nil
-				
+
 			case "ctrl+p":
 				// Paste from system clipboard
 				if text, err := clipboard.ReadAll(); err == nil {
@@ -415,14 +415,14 @@ func (e *ViEditor) Update(msg tea.Msg) (*ViEditor, tea.Cmd) {
 				}
 				return e, nil
 			}
-			
+
 		case VisualMode:
 			switch msg.String() {
 			case "esc":
 				// Exit visual mode
 				e.SetNormalMode()
 				return e, nil
-				
+
 			case "h":
 				// Move selection left
 				if e.visualEnd > 0 {
@@ -430,7 +430,7 @@ func (e *ViEditor) Update(msg tea.Msg) (*ViEditor, tea.Cmd) {
 					e.textinput.SetCursor(e.visualEnd)
 				}
 				return e, nil
-				
+
 			case "l":
 				// Move selection right
 				text := e.textinput.Value()
@@ -439,7 +439,7 @@ func (e *ViEditor) Update(msg tea.Msg) (*ViEditor, tea.Cmd) {
 					e.textinput.SetCursor(e.visualEnd)
 				}
 				return e, nil
-				
+
 			case "y":
 				// Yank selection
 				text := e.textinput.Value()
@@ -447,19 +447,19 @@ func (e *ViEditor) Update(msg tea.Msg) (*ViEditor, tea.Cmd) {
 				if start > end {
 					start, end = end, start
 				}
-				
+
 				if end < len(text) {
 					end++ // Include character under cursor
 				}
-				
+
 				if start < len(text) && end <= len(text) {
 					e.clipboard = text[start:end]
 					clipboard.WriteAll(e.clipboard)
 				}
-				
+
 				e.SetNormalMode()
 				return e, nil
-				
+
 			case "d":
 				// Delete selection
 				text := e.textinput.Value()
@@ -467,23 +467,23 @@ func (e *ViEditor) Update(msg tea.Msg) (*ViEditor, tea.Cmd) {
 				if start > end {
 					start, end = end, start
 				}
-				
+
 				if end < len(text) {
 					end++ // Include character under cursor
 				}
-				
+
 				if start < len(text) && end <= len(text) {
 					e.clipboard = text[start:end]
 					newText := text[:start] + text[end:]
 					e.textinput.SetValue(newText)
 					e.textinput.SetCursor(start)
 				}
-				
+
 				e.SetNormalMode()
 				return e, nil
 			}
 		}
-		
+
 		// Global key handlers
 		switch msg.String() {
 		case "esc":
@@ -492,7 +492,7 @@ func (e *ViEditor) Update(msg tea.Msg) (*ViEditor, tea.Cmd) {
 				e.SetNormalMode()
 				return e, nil
 			}
-			
+
 		case "ctrl+c":
 			// Copy text to system clipboard in any mode
 			if e.mode == VisualMode {
@@ -501,11 +501,11 @@ func (e *ViEditor) Update(msg tea.Msg) (*ViEditor, tea.Cmd) {
 				if start > end {
 					start, end = end, start
 				}
-				
+
 				if end < len(text) {
 					end++ // Include character under cursor
 				}
-				
+
 				if start < len(text) && end <= len(text) {
 					clipboard.WriteAll(text[start:end])
 				}
@@ -513,7 +513,7 @@ func (e *ViEditor) Update(msg tea.Msg) (*ViEditor, tea.Cmd) {
 				clipboard.WriteAll(e.textinput.Value())
 			}
 			return e, nil
-			
+
 		case "ctrl+v":
 			// Paste from system clipboard in any mode
 			if text, err := clipboard.ReadAll(); err == nil {
@@ -526,14 +526,14 @@ func (e *ViEditor) Update(msg tea.Msg) (*ViEditor, tea.Cmd) {
 				}
 			}
 			return e, nil
-			
+
 		case "up":
 			// Previous history with up arrow
 			if e.mode == InsertMode {
 				e.PreviousHistory()
 				return e, nil
 			}
-			
+
 		case "down":
 			// Next history with down arrow
 			if e.mode == InsertMode {
@@ -542,13 +542,13 @@ func (e *ViEditor) Update(msg tea.Msg) (*ViEditor, tea.Cmd) {
 			}
 		}
 	}
-	
+
 	// Pass to underlying text input if in insert mode
 	if e.mode == InsertMode {
 		e.textinput, cmd = e.textinput.Update(msg)
 		return e, cmd
 	}
-	
+
 	return e, nil
 }
 
