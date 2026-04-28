@@ -1,3 +1,8 @@
+<!-- ghmig:moved -->
+> **This repository has moved to [https://git.navicore.tech/navicore/mcpterm-go](https://git.navicore.tech/navicore/mcpterm-go).**
+>
+> The GitHub copy is archived and no longer maintained.
+
 # MCPTerm
 
 A terminal-based chat application built with Go. Features vi-like navigation, text formatting, and multiple chat backends.
